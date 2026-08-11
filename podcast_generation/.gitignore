@@ -1,0 +1,27 @@
+# Environments
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Runtime state and generated artifacts
+checkpoints/
+podcast_books_db/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
