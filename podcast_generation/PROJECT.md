@@ -11,10 +11,10 @@
 Tier 1 — Orchestrator
 Tier 2 - Content Director: Book Selection Agent, Expert Profile Builder, Script Architect (trained?) -> shared state
 Tier 2 - Production Director: Host Voice Agent (TTS) (trained?), Expert Voice Agent (distinct persona + TTS), Audio Engineer Agent, (Learning Bundle Creation Agent) -> shared state
-Tier 2 - Distribution Director: RSS & Platform Publisher, Social Clip Cutter, Social Media Writer,
+Tier 2 - Distribution Director: RSS & Platform Publisher, (Social Clip Cutter), Social Media Writer,
 (Newsletter Digest Agent, SEO Metadata Agent,) (Outreach Agent) -> shared state
 
 # Workflow
 Book Selection -> Expert Profile Builder -> Script drafting -> Human Review
-Generate audio for host and expert -> prepare the episode (with audio engineer agent) -> Human Review
-Prepare social media posts: text, (newsletter, blog -> LATER!) + create short clips -> Human Review -> publish and manage published content
+Generate audio for host and expert -> prepare the episode (with audio engineer agent: use Auphonic API / pydub / Elevenlabs / Resemble AI -> clone the voice first ) -> Human Review
+Prepare social media posts: text, (newsletter, blog -> LATER!) + create short clips (Canva mcp) -> Human Review -> publish and manage published content

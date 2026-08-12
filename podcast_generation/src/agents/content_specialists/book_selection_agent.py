@@ -6,9 +6,7 @@ import opik
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents import AgentState
-from typing_extensions import NotRequired
-from typing import Literal, Callable, List
+from typing import Callable, List
 from langchain_core.utils import secret_from_env, convert_to_secret_str
 from langchain_core.messages import ToolMessage
 
@@ -19,6 +17,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import BookSelectionTools
 from .prompts import BookSelectionPrompt
+from .state import BookSelectionState
 
 load_dotenv()
 
@@ -38,14 +37,6 @@ book_selection_model = ChatOpenRouter(
     # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
     # api_key=OPENROUTER_API_KEY
 )
-
-# Define the possible workflow steps
-SupportStep = Literal["check_booklist", "find_books", "update_booklist"]
-
-class BookSelectionState(AgentState):
-    """State for customer support workflow."""
-    current_step: NotRequired[SupportStep]
-    # proposed_books: NotRequired[List[str]]
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {

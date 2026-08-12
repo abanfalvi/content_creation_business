@@ -10,18 +10,12 @@ from langgraph.graph import StateGraph, START, END
 from typing import Literal, Callable
 from typing_extensions import NotRequired
 
-from .tools import DirectorTools
+from .director_tools import DirectorTools
 from .prompts import ContentDirectorPrompt
+from .state import MultiAgentState, DirectorStep
 
 with open("src/agents/content_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
-
-SupportStep = Literal["call_book_selection_agent", "call_expert_builder_agent", "call_script_drafter_agent", "edit_prompts", "review_expert_profile"]
-
-class MultiAgentState(AgentState):
-    """State for customer support workflow."""
-    active_agent: NotRequired[SupportStep]
-    # book_title: NotRequired[str]
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {

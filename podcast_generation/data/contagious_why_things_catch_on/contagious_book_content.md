@@ -1,3 +1,38 @@
+## Table of Contents
+
+Introduction: Why Things Catch On
+
+1. Social Currency
+
+2. Triggers
+
+3. Emotion
+
+4. Public
+
+5. Practical Value
+
+6. Stories
+
+Epilogue
+
+Acknowledgments
+
+Readers Group Guide
+
+Questions for Discussion
+
+Expand Your Book Club
+
+A Conversation with Jonah Berger
+
+About Jonah Berger
+
+Notes
+
+Index
+
+
 # Introduction: Why Things Catch On
 
 By the time Howard Wein moved to Philadelphia in March 2004, he already had lots of experience in the hospitality industry. He had earned an MBA in hotel management, helped Starwood Hotels launch its W brand, and managed billions of dollars in revenue as Starwood's corporate director of food and beverage. But he was done with “big.” He yearned for a smaller, more restaurant-focused environment. So he moved to Philly to help design and launch a new luxury boutique steakhouse called Barclay Prime.

@@ -26,6 +26,12 @@ become a monologue — break it up with host follow-ups per the host
 persona's techniques (one question at a time, ask for the concrete
 version, name the tension).
 
+Where a line's delivery isn't obvious from the dialogue itself, you may
+prefix it with a short parenthetical emotional tag for the Fish Audio TTS
+model (e.g. "(laughs)", "(curious)", "(thoughtful)", "(skeptical)"). Use
+these sparingly — most lines should carry no tag at all — since overusing
+them makes the audio sound stilted rather than natural.
+
 Use append_script to add new segments as you draft them and edit_script
 to make targeted revisions to lines already written — don't rewrite the
 whole script to fix one exchange. Build the script incrementally, segment

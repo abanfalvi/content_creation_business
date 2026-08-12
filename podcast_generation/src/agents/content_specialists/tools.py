@@ -8,16 +8,20 @@ from langchain_classic.retrievers.contextual_compression import (
 )
 import json
 from dotenv import load_dotenv
-from typing import List, Literal
+from typing import List
 
-from .director import MultiAgentState
+from .state import BookSelectionState, ExpertBuilderState, ScriptDrafterState
 from ...vector_db import vector_store
 
-from .book_selection_agent import book_selection_agent, BookSelectionState
-from .expert_builder_agent import expert_builder_agent
-from .script_drafter_agent import script_drafter_agent
-
 load_dotenv()
+
+def get_book_path(book_title: str):
+    symbols = [":", " ", ","]
+    for symbol in symbols:
+        book_title = book_title.replace(symbol, "_")
+        book_title = book_title.replace("__", "_")
+    title = book_title.lower()
+    return title
 
 class BookSelectionTools:
     "List of tools for Book Selection Agent"
@@ -112,22 +116,23 @@ class BookSelectionTools:
 class ExpertProfileTools:
 
     @tool
-    def read_persona(book_title: str):
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
-        with open("data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
+    def read_persona(book_title: str, runtime: ToolRuntime[None, ExpertBuilderState]):
+        "Read the expert persona that has been drafted so far"
+        title = get_book_path(book_title)
+        with open(f"data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
             persona_content = f.read()
-        return persona_content
+        return Command(update={
+            "messages": [ToolMessage(content=persona_content, tool_call_id=runtime.tool_call_id)],
+            "persona_read": True,
+        })
 
     @tool
-    def edit_persona(book_title: str, to_replace: str, replace_with: str):
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
-        path = "data/{title}/expert_persona.md"
+    def edit_persona(book_title: str, to_replace: str, replace_with: str, runtime: ToolRuntime[None, ExpertBuilderState]):
+        "Edit the expert persona in certain parts"
+        if not runtime.state.get("persona_read"):
+            return "Error: you must call read_persona before editing. Call it now."
+        title = get_book_path(book_title)
+        path = f"data/{title}/expert_persona.md"
         with open(path, "r", encoding="utf-8") as f:
             persona_content = f.read()
         count = persona_content.count(to_replace)
@@ -143,21 +148,22 @@ class ExpertProfileTools:
         return "Persona updated!"          
 
     @tool
-    def append_persona(book_title: str, content: str):
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
+    def append_persona(book_title: str, content: str, runtime: ToolRuntime[None, ExpertBuilderState]):
+        "Add further information to the end of the document about the expert persona"
+        if not runtime.state.get("persona_read"):
+            return "Error: you must call read_persona before editing. Call it now."
+        title = get_book_path(book_title)
 
-        with open("data/{title}/expert_persona.md", "a", encoding="utf-8") as f:
+        with open(f"data/{title}/expert_persona.md", "a", encoding="utf-8") as f:
             f.write(content)
 
         return f"{content} - has been appended to the expert profile persona!"
 
     @tool
     def retrieve_info(query: str):
+        "Retrieve information to understand the content of the book"
         retriever = vector_store.as_retriever(k=20)
-        compressor = CohereRerank(model="rerank-fast-v4.0", top_n=5)
+        compressor = CohereRerank(model="rerank-v4.0-fast", top_n=5) 
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, base_retriever=retriever
         )
@@ -167,12 +173,25 @@ class ExpertProfileTools:
         return compressed_docs
 
 class ScriptDrafterTools:
-    def edit_script(book_title: str, to_replace: str, replace_with: str):
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
-        path = "data/{title}/script.md"
+
+    @tool
+    def read_script(book_title: str, runtime: ToolRuntime[None, ScriptDrafterState]):
+        "Read the content of the script draft"
+        title = get_book_path(book_title)
+        with open(f"data/{title}/script.md", "r", encoding="utf-8") as f:
+            script_content = f.read()
+        return Command(update={
+            "messages": [ToolMessage(content=script_content, tool_call_id=runtime.tool_call_id)],
+            "script_read": True,
+        })
+
+    @tool
+    def edit_script(book_title: str, to_replace: str, replace_with: str, runtime: ToolRuntime[None, ScriptDrafterState]):
+        "Edit the podcast script in specific parts"
+        if not runtime.state.get("script_read"):
+            return "Error: you must call read_script before editing. Call it now."
+        title = get_book_path(book_title)
+        path = f"data/{title}/script.md"
         with open(path, "r", encoding="utf-8") as f:
             script_content = f.read()
         count = script_content.count(to_replace)
@@ -187,95 +206,27 @@ class ScriptDrafterTools:
 
         return "Script is updated!"
 
-    def append_script(book_title: str, content: str):
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
+    @tool
+    def append_script(book_title: str, content: str, runtime: ToolRuntime[None, ScriptDrafterState]):
+        "Add further information/extend the script"
+        if not runtime.state.get("script_read"):
+            return "Error: you must call read_script before editing. Call it now."
+        title = get_book_path(book_title)
 
-        with open("data/{title}/script.md", "a", encoding="utf-8") as f:
+        with open(f"data/{title}/script.md", "a", encoding="utf-8") as f:
             f.write(content)
 
         return f"{content} - has been appended to the script!"
 
+    @tool
     def read_personas(book_title: str, host: bool = True):
-        "Read the personas that were created: Host or Expert"
+        "Read the personas that were created: Host or Expert. It will only return either personas based on the input parameters"
         if host:
             with open("data/host_persona.md", "r", encoding="utf-8") as f:
                 host_persona = f.read()
             return host_persona
         else:
-            symbols = [":", " ", ","]
-            for symbol in symbols:
-                title = book_title.replace(symbol, "_")
-            title = title.lower()
-            with open("data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
+            title = get_book_path(book_title)
+            with open(f"data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
                 expert_persona = f.read()
             return expert_persona
-
-class DirectorTools:
-
-    @tool("select_books", description="Find the next relevant book to work on")
-    def call_book_selection_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = book_selection_agent.invoke({"messages": [{"role": "user", "content": query}]})
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        content=result["messages"][-1].content,
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-                "active_agent": "review_expert_profile",
-            }
-        ) 
-
-    @tool("build_expert_profile", description="Create an expert persona for the book")
-    def call_expert_builder_agent(query: str, book_title: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = expert_builder_agent.invoke({"messages": [{"role": "user", "content": query}]})
-        summary = result["messages"][-1].content
-
-        symbols = [":", " ", ","]
-        for symbol in symbols:
-            title = book_title.replace(symbol, "_")
-        title = title.lower()
-        with open("data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
-            persona_content = f.read()
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        content=f"{summary}\n\n---\nCurrent persona:\n{persona_content}",
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-                "active_agent": "review_expert_profile",
-            }
-        )
-
-    @tool("draft_script", description="Draft the script for the next podcast episode")
-    def call_script_drafter_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}]})
-        return result["messages"][-1].content
-
-    @tool
-    def edit_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"], to_replace: str, replace_with: str):
-        path = f"src/agents/content_specialists/prompts/{agent_name}_prompt.md"
-        with open(path, "r", encoding="utf-8") as f:
-            agent_prompt = f.read()
-        count = agent_prompt.count(to_replace)
-        if count == 0:
-            return f"Error: old_string not found in {path}. Read the file again and copy the exact text to replace."
-        if count > 1:
-            return f"Error: old_string matches {count} locations in {path}. Include more surrounding context so it's unique."
-        new_content = agent_prompt.replace(to_replace, replace_with)
-
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        return f"{agent_name} system prompt has been updated"
-
-    @tool
-    def read_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"]):
-        with open(f"src/agents/content_specialists/prompts/{agent_name}_prompt.md", "r", encoding="utf-8") as f:
-            agent_prompt = f.read()
-        return agent_prompt

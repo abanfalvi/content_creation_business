@@ -7,9 +7,7 @@ import opik
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents import AgentState
-from typing_extensions import NotRequired
-from typing import Literal, Callable, List
+from typing import Callable, List
 from langchain_core.messages import ToolMessage
 
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call
@@ -18,6 +16,7 @@ from langgraph.types import Command
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ScriptDrafterTools, ExpertProfileTools
+from .state import ScriptDrafterState
 
 load_dotenv()
 
@@ -33,13 +32,6 @@ script_drafter_model = ChatOpenRouter(
     # api_key=OPENROUTER_API_KEY
 )
 
-# Define the possible workflow steps
-SupportStep = Literal["edit_script", "read_personas", "retrieve_content"]
-
-class ScriptDrafterState(AgentState):
-    """State for customer support workflow."""
-    current_step: NotRequired[SupportStep]
-    # proposed_books: NotRequired[List[str]]
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
@@ -95,6 +87,7 @@ def apply_step_config(
 all_tools = [
     ScriptDrafterTools.append_script,
     ScriptDrafterTools.edit_script,
+    ScriptDrafterTools.read_script,
     ScriptDrafterTools.read_personas,
     ExpertProfileTools.retrieve_info,
 ]

@@ -9,9 +9,7 @@ import opik
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents import AgentState
-from typing_extensions import NotRequired
-from typing import Literal, Callable, List
+from typing import Callable, List
 from langchain_core.messages import ToolMessage
 
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware
@@ -20,6 +18,7 @@ from langgraph.types import Command
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ExpertProfileTools
+from .state import ExpertBuilderState
 
 load_dotenv()
 
@@ -35,30 +34,22 @@ expert_builder_model = ChatOpenRouter(
     # api_key=OPENROUTER_API_KEY
 )
 
-# Define the possible workflow steps
-SupportStep = Literal["retrieve_content", "read_persona", "edit_persona"]
 
-class ExpertBuilderState(AgentState):
-    """State for customer support workflow."""
-    current_step: NotRequired[SupportStep]
-    # proposed_books: NotRequired[List[str]]
-
-# Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
-    "check_booklist": {
+    "retrieve_content": {
         "prompt": "",
         "tools": [],
         "requires": [],
     },
-    "find_books": {
+    "read_persona": {
         "prompt": "",
         "tools": [],
         "requires": [],
     },
-    "update_booklist": {
+    "edit_persona": {
         "prompt": "",
         "tools": [],
-        "requires": [], # these go into the prompt
+        "requires": [], 
     },
 }
 
