@@ -6,6 +6,7 @@ from langchain.agents import AgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call
 from langgraph.graph import StateGraph, START, END
+from langchain_openrouter import ChatOpenRouter
 
 from typing import Literal, Callable
 from typing_extensions import NotRequired
@@ -13,9 +14,15 @@ from typing_extensions import NotRequired
 from .director_tools import DirectorTools
 from .prompts import ContentDirectorPrompt
 from .state import MultiAgentState, DirectorStep
+from ..models import DIRECTOR_MODEL
 
 with open("src/agents/content_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
+
+director_model = ChatOpenRouter(
+    model=DIRECTOR_MODEL,
+    temperature=.1
+)
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
@@ -94,7 +101,7 @@ conn = sqlite3.connect("./checkpoints/content_checkpoints.db", check_same_thread
 checkpointer = SqliteSaver(conn)
 
 director_agent = create_agent(
-    model="deepseek/deepseek-v4-flash",
+    model=director_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
     state_schema=MultiAgentState,

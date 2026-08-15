@@ -18,6 +18,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 from .tools import BookSelectionTools
 from .prompts import BookSelectionPrompt
 from .state import BookSelectionState
+from ..models import BOOK_SELECTION_MODEL
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ opik.configure(workspace="dreadnought0073", project_name="podcast_generation")
 # -> If PDF is not available, indicate to the user that it is missing
 
 book_selection_model = ChatOpenRouter(
-    model="inclusionai/ling-3.0-flash",
+    model=BOOK_SELECTION_MODEL,
     temperature=0.2,
     # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
     # api_key=OPENROUTER_API_KEY

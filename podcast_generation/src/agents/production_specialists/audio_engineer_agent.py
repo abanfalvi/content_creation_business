@@ -14,6 +14,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import AudioEngineerTools
 from .state import AudioEngineerState, RubricScores
+from ..models import AUDIO_ENGINEER_MODEL
 
 load_dotenv()
 
@@ -23,7 +24,7 @@ with open(r"src\agents\production_specialists\prompts\audio_engineer_agent_promp
     SYSTEM_PROMPT = f.read()
 
 audio_engineer_model = ChatOpenRouter(
-    model="xiaomi/mimo-v2.5",
+    model=AUDIO_ENGINEER_MODEL,
     temperature=0.2,
     # api_key=OPENROUTER_API_KEY
 )

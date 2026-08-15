@@ -25,3 +25,5 @@ podcast_books_db/
 Thumbs.db
 .vscode/
 .idea/
+
+*mcp_tokens.*

@@ -19,6 +19,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ExpertProfileTools
 from .state import ExpertBuilderState
+from ..models import EXPERT_BUILDER_MODEL
 
 load_dotenv()
 
@@ -28,7 +29,7 @@ with open("src/agents/content_specialists/prompts/expert_builder_agent_prompt.md
     SYSTEM_PROMPT = f.read()
 
 expert_builder_model = ChatOpenRouter(
-    model="qwen/qwen3.7-flash",
+    model=EXPERT_BUILDER_MODEL,
     temperature=0.2,
     # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
     # api_key=OPENROUTER_API_KEY

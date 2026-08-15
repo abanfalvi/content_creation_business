@@ -10,7 +10,7 @@
 # Agent Architecture
 Tier 1 — Orchestrator
 Tier 2 - Content Director: Book Selection Agent, Expert Profile Builder, Script Architect (trained?) -> shared state
-Tier 2 - Production Director: Host Voice Agent (TTS) (trained?), Expert Voice Agent (distinct persona + TTS), Audio Engineer Agent, (Learning Bundle Creation Agent) -> shared state
+Tier 2 - Host Voice Agent (TTS) (trained?), Expert Voice Agent (distinct persona + TTS), Audio Engineer Agent, (Learning Bundle Creation Agent) -> shared state
 Tier 2 - Distribution Director: RSS & Platform Publisher, (Social Clip Cutter), Social Media Writer,
 (Newsletter Digest Agent, SEO Metadata Agent,) (Outreach Agent) -> shared state
 

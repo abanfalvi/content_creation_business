@@ -17,6 +17,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ScriptDrafterTools, ExpertProfileTools
 from .state import ScriptDrafterState
+from ..models import SCRIPT_DRAFTER_MODEL
 
 load_dotenv()
 
@@ -26,7 +27,7 @@ with open("src/agents/content_specialists/prompts/script_drafter_agent_prompt.md
     SYSTEM_PROMPT = f.read()
 
 script_drafter_model = ChatOpenRouter(
-    model="qwen/qwen3.7-flash",
+    model=SCRIPT_DRAFTER_MODEL,
     temperature=0.3,
     # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
     # api_key=OPENROUTER_API_KEY
