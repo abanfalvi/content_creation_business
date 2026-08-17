@@ -95,7 +95,9 @@ all_tools = [
     ExpertProfileTools.edit_persona,
     ExpertProfileTools.read_persona,
     ExpertProfileTools.retrieve_info,
-    ExpertProfileTools.append_persona
+    ExpertProfileTools.append_persona,
+    ExpertProfileTools.load_skill_content,
+    ExpertProfileTools.load_available_skills
 ]
 
 expert_builder_agent = create_agent(

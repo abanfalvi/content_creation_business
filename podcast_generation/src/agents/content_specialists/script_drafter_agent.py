@@ -95,6 +95,8 @@ all_tools = [
     ScriptDrafterTools.read_script,
     ScriptDrafterTools.read_personas,
     ExpertProfileTools.retrieve_info,
+    ScriptDrafterTools.load_available_skills,
+    ScriptDrafterTools.load_skill_content
 ]
 
 script_drafter_agent = create_agent(

@@ -38,7 +38,9 @@ all_tools = [
     AudioEngineerTools.trim_audio,
     AudioEngineerTools.trim_silence,
     AudioEngineerTools.generate_audio,
-    AudioEngineerTools.record_rubric_scores
+    AudioEngineerTools.record_rubric_scores,
+    AudioEngineerTools.load_available_skills,
+    AudioEngineerTools.load_skill_content
 ]
 
 audio_engineer = create_agent(

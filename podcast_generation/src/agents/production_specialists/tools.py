@@ -1,8 +1,9 @@
 from openrouter import OpenRouter
 from dotenv import load_dotenv
-import os
+import os, uuid, frontmatter
 import base64
-from typing import Literal
+from pathlib import Path
+from typing import Literal, List, Tuple
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
@@ -125,6 +126,25 @@ class AudioEngineerTools:
         base.overlay(overlay, position=position_ms).export(output_path, format="mp3")
         return output_path
 
+    @tool
+    def load_skill_content(skill_name: str) -> str:
+        "Load the content of the specific skill"
+        post = frontmatter.load(f"skills/production_skills/{skill_name}.md")
+        return post.content
+
+    @tool
+    def load_available_skills() -> List[Tuple[str, str]] | str:
+        "Load the name and descriptions of the available skills"
+        all_skills = list(Path(r"src\skills\production_skills").iterdir())
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"
+
 class LessonsLearnedExtracterAgentTools:
 
     @tool
@@ -143,10 +163,16 @@ class LessonsLearnedExtracterAgentTools:
         Confirmation that your input has been saved to the persistent local store.
         """
         if success_trace:
-            runtime.store.put(book_title, "Successful Trace", {"Title": title, "Description": description, "Content": content})
+            runtime.store.put((book_title, "production_traces"), str(uuid.uuid4()), {
+                "type": "success",
+                "Title": title, "Description": description, "Content": content,
+            })
             return "Successful trace has been saved!"
         else:
-            runtime.store.put(book_title, "Failed Trace", {"Title": title, "Description": description, "Content": content})
+            runtime.store.put((book_title, "production_traces"), str(uuid.uuid4()), {
+                "type": "failure",
+                "Title": title, "Description": description, "Content": content,
+            })
             return "Failed trace has been saved!"
 
     @staticmethod

@@ -22,3 +22,6 @@ COMPRESSOR_MODEL = "inclusionai/ling-3.0-flash"
 
 # Lessons Learned Extractor Model
 LL_EXTRACTOR_AGENT = "deepseek/deepseek-v4-flash"
+
+# Successful traces to skill converter model
+SKILL_CONVERTER_MODEL = "qwen/qwen3.7-flash"

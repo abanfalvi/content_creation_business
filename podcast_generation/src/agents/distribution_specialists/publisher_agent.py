@@ -28,6 +28,8 @@ async def build_publisher_agent():
             PublisherAgentTools.get_show_info,
             PublisherAgentTools.get_show_episodes,
             PublisherAgentTools.get_episode_details,
+            PublisherAgentTools.load_available_skills,
+            PublisherAgentTools.load_skill_content,
             *sm_management_tools,
         ],
         system_prompt=SYSTEM_PROMPT,

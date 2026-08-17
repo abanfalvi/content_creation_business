@@ -6,9 +6,10 @@ from langchain_cohere import CohereRerank
 from langchain_classic.retrievers.contextual_compression import (
     ContextualCompressionRetriever,
 )
-import json
+import json, frontmatter
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Tuple
+from pathlib import Path
 
 from .state import BookSelectionState, ExpertBuilderState, ScriptDrafterState
 from ...vector_db import vector_store
@@ -172,6 +173,25 @@ class ExpertProfileTools:
         )
         return compressed_docs
 
+    @tool
+    def load_skill_content(skill_name: str) -> str:
+        "Load the content of the specific skill"
+        post = frontmatter.load(f"skills/content_skills/expert_builder_agent/{skill_name}.md")
+        return post.content
+
+    @tool
+    def load_available_skills() -> List[Tuple[str, str]] | str:
+        "Load the name and descriptions of the available skills"
+        all_skills = list(Path("src/skills/content_skills/expert_builder_agent/").iterdir())
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"
+
 class ScriptDrafterTools:
 
     @tool
@@ -230,3 +250,22 @@ class ScriptDrafterTools:
             with open(f"data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
                 expert_persona = f.read()
             return expert_persona
+
+    @tool
+    def load_skill_content(skill_name: str) -> str:
+        "Load the content of the specific skill"
+        post = frontmatter.load(f"skills/content_skills/script_drafter_agent/{skill_name}.md")
+        return post.content
+
+    @tool
+    def load_available_skills() -> List[Tuple[str, str]] | str:
+        "Load the name and descriptions of the available skills"
+        all_skills = list(Path("src/skills/content_skills/script_drafter_agent/").iterdir())
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"

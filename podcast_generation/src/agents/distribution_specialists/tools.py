@@ -1,7 +1,8 @@
 from openrouter import OpenRouter, utils
 from dotenv import load_dotenv
-import os
-import time
+import os, frontmatter, time
+from pathlib import Path
+from typing import List, Tuple
 import base64, requests
 from typing import Literal
 from langchain.tools import tool, ToolRuntime
@@ -88,6 +89,25 @@ class SMWriterAgentTools:
         "Tool to create a folder to save content locally"
         path = os.mkdir(f"{folder_path}/{folder_name}")
         return path
+
+    @tool
+    def load_skill_content(skill_name: str) -> str:
+        "Load the content of the specific skill"
+        post = frontmatter.load(f"skills/distribution_skills/sm_writer_agent/{skill_name}.md")
+        return post.content
+
+    @tool
+    def load_available_skills() -> List[Tuple[str, str]] | str:
+        "Load the name and descriptions of the available skills"
+        all_skills = list(Path("src/skills/distribution_skills/sm_writer_agent/").iterdir())
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"
 
 class PublisherAgentTools:
 
@@ -196,3 +216,22 @@ class PublisherAgentTools:
             "cover_image_url": episode["images"][0]["url"] if episode["images"] else None,
             "url": episode["external_urls"]["spotify"],
         }
+
+    @tool
+    def load_skill_content(skill_name: str) -> str:
+        "Load the content of the specific skill"
+        post = frontmatter.load(f"skills/distribution_skills/publisher_agent/{skill_name}.md")
+        return post.content
+
+    @tool
+    def load_available_skills() -> List[Tuple[str, str]] | str:
+        "Load the name and descriptions of the available skills"
+        all_skills = list(Path("src/skills/distribution_skills/publisher_agent/").iterdir())
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"

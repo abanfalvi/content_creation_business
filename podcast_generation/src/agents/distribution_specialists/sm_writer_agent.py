@@ -25,7 +25,15 @@ async def build_sm_writer_agent():
     canva_tools = await get_canva_mcp()
     agent = create_agent(
         ChatOpenRouter(model=SM_WRITER_MODEL, temperature=.2),
-        tools=[*canva_tools, SMWriterAgentTools.generate_image, SMWriterAgentTools.download_export, SMWriterAgentTools.save_post_text, SMWriterAgentTools.create_folder],
+        tools=[
+            *canva_tools, 
+            SMWriterAgentTools.generate_image, 
+            SMWriterAgentTools.download_export, 
+            SMWriterAgentTools.save_post_text, 
+            SMWriterAgentTools.create_folder,
+            SMWriterAgentTools.load_available_skills,
+            SMWriterAgentTools.load_skill_content
+        ],
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
         middleware=[

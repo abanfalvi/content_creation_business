@@ -2,6 +2,7 @@ from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from langchain.tools import tool, ToolRuntime
 from typing import Literal
+import uuid
 
 from .state import MultiAgentState
 from .sm_writer_agent import sm_writer_agent
@@ -80,8 +81,16 @@ class DirectorTools:
         Confirmation that your input has been saved to the persistent local store.
         """
         if success_trace:
-            runtime.store.put(book_title, "Successful Trace", {"Title": title, "Description": description, "Content": content})
+            runtime.store.put((book_title, "distribution_traces"), str(uuid.uuid4()), {
+                "type": "success",
+                "active_agent": runtime.state.get("active_agent"),
+                "Title": title, "Description": description, "Content": content,
+            })
             return "Successful trace has been saved!"
         else:
-            runtime.store.put(book_title, "Failed Trace", {"Title": title, "Description": description, "Content": content})
+            runtime.store.put((book_title, "distribution_traces"), str(uuid.uuid4()), {
+                "type": "failure",
+                "active_agent": runtime.state.get("active_agent"),
+                "Title": title, "Description": description, "Content": content,
+            })
             return "Failed trace has been saved!"
