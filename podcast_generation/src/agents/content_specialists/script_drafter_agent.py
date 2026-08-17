@@ -10,14 +10,14 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import Callable, List
 from langchain_core.messages import ToolMessage
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call
-from langgraph.types import Command
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, SummarizationMiddleware, FilesystemFileSearchMiddleware
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ScriptDrafterTools, ExpertProfileTools
 from .state import ScriptDrafterState
-from ..models import SCRIPT_DRAFTER_MODEL
+from ..models import SCRIPT_DRAFTER_MODEL, COMPRESSOR_MODEL
+from .director import checkpointer
 
 load_dotenv()
 
@@ -33,6 +33,10 @@ script_drafter_model = ChatOpenRouter(
     # api_key=OPENROUTER_API_KEY
 )
 
+compressor_model = ChatOpenRouter(
+    model=COMPRESSOR_MODEL,
+    temperature=0.2,
+)
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
@@ -93,21 +97,17 @@ all_tools = [
     ExpertProfileTools.retrieve_info,
 ]
 
-# Create the agent with step-based configuration
-conn = sqlite3.connect("./checkpoints/content_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
-
 script_drafter_agent = create_agent(
     script_drafter_model,
     tools=all_tools,
     state_schema=ScriptDrafterState,
     system_prompt=SYSTEM_PROMPT,
     middleware=[
-        # apply_step_config,
-        HumanInTheLoopMiddleware(
-            interrupt_on={"": {"allowed_decisions": ["approve", "reject"]}},
-            description_prefix="Final script pending approval",
+        FilesystemFileSearchMiddleware(
+            root_path="/data",
+            use_ripgrep=True,
         ),
+        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8)),
     ],
     checkpointer=checkpointer,
 )

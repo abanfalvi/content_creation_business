@@ -1,46 +1,38 @@
 
 import sqlite3
 
-from langchain.agents import create_agent
-from langchain.agents import AgentState
+from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call, SummarizationMiddleware
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call
 from langgraph.graph import StateGraph, START, END
 from langchain_openrouter import ChatOpenRouter
 
 from typing import Literal, Callable
-from typing_extensions import NotRequired
 
 from .director_tools import DirectorTools
-from .prompts import ContentDirectorPrompt
+from .prompts import DistributionDirectorPrompt
 from .state import MultiAgentState
-from ..models import DIRECTOR_MODEL
-from ...memory.memory_store import shared_store
+from ..models import DISTRIBUTION_DIRECTOR_MODEL
 from .utils import checkpointer
 
-with open("src/agents/content_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
+with open("src/agents/distribution_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 director_model = ChatOpenRouter(
-    model=DIRECTOR_MODEL,
+    model=DISTRIBUTION_DIRECTOR_MODEL,
     temperature=.1
 )
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
-    "call_book_selection_agent": {
+    "call_sm_writer_agent": {
         "prompt": "",
-        "tools": [DirectorTools.call_book_selection_agent],
+        "tools": [DirectorTools.call_sm_writer_agent],
         "requires": [],
     },
-    "call_expert_builder_agent": {
+    "call_publisher_agent": {
         "prompt": "",
-        "tools": [DirectorTools.call_expert_builder_agent],
-        "requires": [],
-    },
-    "call_script_drafter_agent": {
-        "prompt": "",
-        "tools": [DirectorTools.call_script_drafter_agent],
+        "tools": [DirectorTools.call_publisher_agent],
         "requires": [],
     },
     # set current step/ active agent to this, when needed, during invoke method
@@ -49,9 +41,9 @@ STEP_CONFIG = {
         "tools": [DirectorTools.edit_subagents_system_prompt, DirectorTools.read_subagents_system_prompt],
         "requires": [],
     },
-    "review_expert_profile": {
-        "prompt": ContentDirectorPrompt.REVIEW_EXPERT_PROFILE,
-        "tools": [DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
+    "review_post": {
+        "prompt": DistributionDirectorPrompt.REVIEW_POST,
+        "tools": [DirectorTools.call_sm_writer_agent, DirectorTools.call_publisher_agent],
         "requires": [],
     },
     "get_lessons_learned": {
@@ -59,6 +51,7 @@ STEP_CONFIG = {
         "tools": [DirectorTools.save_learnable_traces],
         "requires": [],
     },
+
 }
 
 def extract_learnable_traces(thread_id: str, agent):
@@ -106,7 +99,7 @@ def apply_step_config(
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """Configure agent behavior based on the current step."""
-    active_agent = request.state.get("active_agent", "call_book_selection_agent")
+    active_agent = request.state.get("active_agent", "call_sm_writer_agent")
     thread_id = request.runtime.execution_info.thread_id
 
     # Look up step configuration
@@ -116,6 +109,7 @@ def apply_step_config(
     for key in stage_config["requires"]:
         if request.state.get(key) is None:
             raise ValueError(f"{key} must be set before reaching {active_agent}")
+
     if active_agent == "get_lessons_learned":
         traces = extract_learnable_traces(thread_id, director_agent)
         step_prompt = f"""
@@ -134,7 +128,6 @@ def apply_step_config(
             **request.state
             )
 
-    # Inject system prompt and step-specific tools
     if step_prompt:
         request = request.override(
             system_prompt=step_prompt,
@@ -148,9 +141,8 @@ def apply_step_config(
     return handler(request)
 
 all_tools = [
-    DirectorTools.call_book_selection_agent,
-    DirectorTools.call_expert_builder_agent,
-    DirectorTools.call_script_drafter_agent,
+    DirectorTools.call_publisher_agent,
+    DirectorTools.call_sm_writer_agent,
     DirectorTools.read_subagents_system_prompt,
     DirectorTools.edit_subagents_system_prompt,
     DirectorTools.save_learnable_traces
@@ -161,13 +153,6 @@ director_agent = create_agent(
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
     state_schema=MultiAgentState,
-    middleware=[
-        apply_step_config,
-        HumanInTheLoopMiddleware(
-            interrupt_on={"human_review": {"allowed_decisions": ["approve", "reject"]}},
-            description_prefix="Final script pending approval",
-        ),
-    ],
-    checkpointer=checkpointer,
-    store=shared_store
+    middleware=[apply_step_config],
+    checkpointer=checkpointer
 )

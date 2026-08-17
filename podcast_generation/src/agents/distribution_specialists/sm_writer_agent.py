@@ -2,14 +2,13 @@
 
 from .mcp import get_canva_mcp
 from .tools import SMWriterAgentTools
-from ..models import SM_WRITER_MODEL
+from ..models import SM_WRITER_MODEL, COMPRESSOR_MODEL
+from .director import checkpointer
 
 import asyncio
-import sqlite3
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware
+from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware, SummarizationMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,8 +16,10 @@ load_dotenv()
 with open("src/agents/distribution_specialists/prompts/sm_writer_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
-conn = sqlite3.connect("./checkpoints/distribution_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
+compressor_model = ChatOpenRouter(
+    model=COMPRESSOR_MODEL,
+    temperature=0.2,
+)
 
 async def build_sm_writer_agent():
     canva_tools = await get_canva_mcp()
@@ -32,6 +33,7 @@ async def build_sm_writer_agent():
                 root_path="/data",
                 use_ripgrep=True,
             ),
+            SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8)),
         ]
         )
     return agent

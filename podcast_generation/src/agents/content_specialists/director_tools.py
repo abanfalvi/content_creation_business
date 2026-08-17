@@ -1,7 +1,7 @@
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from langchain.tools import tool, ToolRuntime
-from typing import Literal
+from typing import Literal, Optional
 
 from .state import MultiAgentState
 from .book_selection_agent import book_selection_agent
@@ -14,7 +14,7 @@ class DirectorTools:
 
     @tool("select_books", description="Find the next relevant book to work on")
     def call_book_selection_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = book_selection_agent.invoke({"messages": [{"role": "user", "content": query}]})
+        result = book_selection_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
         return Command(
             update={
                 "messages": [
@@ -29,14 +29,14 @@ class DirectorTools:
 
     @tool("build_expert_profile", description="Create an expert persona for the book")
     def call_expert_builder_agent(query: str, book_title: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = expert_builder_agent.invoke({"messages": [{"role": "user", "content": query}]})
+        result = expert_builder_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
         summary = result["messages"][-1].content
 
         symbols = [":", " ", ","]
         for symbol in symbols:
             title = book_title.replace(symbol, "_")
         title = title.lower()
-        with open("data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
+        with open(f"data/{title}/expert_persona.md", "r", encoding="utf-8") as f:
             persona_content = f.read()
         return Command(
             update={
@@ -52,8 +52,18 @@ class DirectorTools:
 
     @tool("draft_script", description="Draft the script for the next podcast episode")
     def call_script_drafter_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}]})
-        return result["messages"][-1].content
+        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=result["messages"][-1].content,
+                        tool_call_id=runtime.tool_call_id,
+                    )
+                ],
+                "active_agent": "human_review",
+            }
+        )
 
     @tool
     def edit_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"], to_replace: str, replace_with: str):
@@ -76,3 +86,25 @@ class DirectorTools:
         with open(f"src/agents/content_specialists/prompts/{agent_name}_prompt.md", "r", encoding="utf-8") as f:
             agent_prompt = f.read()
         return agent_prompt
+
+    @tool
+    def save_learnable_traces(book_title: str, success_trace: bool, title: str, description: str, content: str, runtime: ToolRuntime[None, MultiAgentState]):
+        """
+        Store both positive and negative exemplary traces that can be used for improving the specialist agents
+        
+        Args:
+        book_title: str = name of the book that is being processed
+        success_trace: bool = whether the current input is to reinforce a behaviour (True) or serve as a negative example (False)
+        title: str = a concise summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
+        description: str = one-sentence overview of the item's purpose
+        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences
+
+        Output:
+        Confirmation that your input has been saved to the persistent local store.
+        """
+        if success_trace:
+            runtime.store.put(book_title, "Successful Trace", {"Title": title, "Description": description, "Content": content})
+            return "Successful trace has been saved!"
+        else:
+            runtime.store.put(book_title, "Failed Trace", {"Title": title, "Description": description, "Content": content})
+            return "Failed trace has been saved!"

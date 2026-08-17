@@ -15,3 +15,10 @@ AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5"
 # Distribution specialists
 SM_WRITER_MODEL = "nvidia/nemotron-3.5-lightning"
 PUBLISHER_MODEL = "qwen/qwen3.7-flash"
+DISTRIBUTION_DIRECTOR_MODEL = "deepseek/deepseek-v4-flash"
+
+# Compressor Model
+COMPRESSOR_MODEL = "inclusionai/ling-3.0-flash"
+
+# Lessons Learned Extractor Model
+LL_EXTRACTOR_AGENT = "deepseek/deepseek-v4-flash"

@@ -3,7 +3,7 @@ from typing_extensions import NotRequired
 from typing import Literal
 
 # Director agent
-DirectorStep = Literal["call_book_selection_agent", "call_expert_builder_agent", "call_script_drafter_agent", "edit_prompts", "review_expert_profile"]
+DirectorStep = Literal["call_book_selection_agent", "call_expert_builder_agent", "call_script_drafter_agent", "edit_prompts", "review_expert_profile", "human_review"]
 
 class MultiAgentState(AgentState):
     """State for the director's multi-agent workflow."""

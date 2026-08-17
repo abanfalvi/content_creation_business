@@ -19,6 +19,7 @@ from .tools import BookSelectionTools
 from .prompts import BookSelectionPrompt
 from .state import BookSelectionState
 from ..models import BOOK_SELECTION_MODEL
+from .director import checkpointer
 
 load_dotenv()
 
@@ -97,10 +98,6 @@ all_tools = [
     BookSelectionTools.read_booklist,
     BookSelectionTools.set_book_to_finish
 ]
-
-# Create the agent with step-based configuration
-conn = sqlite3.connect("./checkpoints/content_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
 
 book_selection_agent = create_agent(
     book_selection_model,

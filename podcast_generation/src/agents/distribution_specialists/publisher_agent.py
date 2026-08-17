@@ -3,6 +3,7 @@
 from .tools import PublisherAgentTools
 from ..models import PUBLISHER_MODEL
 from .mcp import get_buffer_mcp
+from .director import checkpointer
 
 import asyncio
 import sqlite3
@@ -16,9 +17,6 @@ load_dotenv()
 
 with open("src/agents/distribution_specialists/prompts/sm_writer_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
-
-conn = sqlite3.connect("./checkpoints/distribution_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
 
 async def build_publisher_agent():
     sm_management_tools = await get_buffer_mcp()

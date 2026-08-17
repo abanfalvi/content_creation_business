@@ -15,6 +15,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 from .tools import AudioEngineerTools
 from .state import AudioEngineerState, RubricScores
 from ..models import AUDIO_ENGINEER_MODEL
+from .utils import checkpointer
 
 load_dotenv()
 
@@ -39,11 +40,6 @@ all_tools = [
     AudioEngineerTools.generate_audio,
     AudioEngineerTools.record_rubric_scores
 ]
-
-
-# Create the agent with step-based configuration
-conn = sqlite3.connect("./checkpoints/production_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
 
 audio_engineer = create_agent(
     audio_engineer_model,

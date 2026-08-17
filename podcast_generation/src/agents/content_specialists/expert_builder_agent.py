@@ -12,14 +12,15 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import Callable, List
 from langchain_core.messages import ToolMessage
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, SummarizationMiddleware 
 from langgraph.types import Command
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ExpertProfileTools
 from .state import ExpertBuilderState
-from ..models import EXPERT_BUILDER_MODEL
+from ..models import EXPERT_BUILDER_MODEL, COMPRESSOR_MODEL
+from .director import checkpointer
 
 load_dotenv()
 
@@ -35,6 +36,10 @@ expert_builder_model = ChatOpenRouter(
     # api_key=OPENROUTER_API_KEY
 )
 
+compressor_model = ChatOpenRouter(
+    model=COMPRESSOR_MODEL,
+    temperature=0.2,
+)
 
 STEP_CONFIG = {
     "retrieve_content": {
@@ -93,17 +98,13 @@ all_tools = [
     ExpertProfileTools.append_persona
 ]
 
-# Create the agent with step-based configuration
-conn = sqlite3.connect("./checkpoints/content_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
-
 expert_builder_agent = create_agent(
     expert_builder_model,
     tools=all_tools,
     state_schema=ExpertBuilderState,
     system_prompt=SYSTEM_PROMPT,
     middleware=[
-        # apply_step_config,
+        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8))
     ],
     checkpointer=checkpointer,
 )
