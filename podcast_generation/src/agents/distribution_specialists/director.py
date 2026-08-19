@@ -3,7 +3,7 @@ import sqlite3
 
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, FilesystemFileSearchMiddleware, wrap_tool_call
 from langgraph.graph import StateGraph, START, END
 from langchain_openrouter import ChatOpenRouter
 
@@ -14,6 +14,7 @@ from .prompts import DistributionDirectorPrompt
 from .state import MultiAgentState
 from ..models import DISTRIBUTION_DIRECTOR_MODEL
 from .utils import checkpointer
+from ...memory.memory_store import shared_store
 
 with open("src/agents/distribution_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
@@ -145,7 +146,8 @@ all_tools = [
     DirectorTools.call_sm_writer_agent,
     DirectorTools.read_subagents_system_prompt,
     DirectorTools.edit_subagents_system_prompt,
-    DirectorTools.save_learnable_traces
+    DirectorTools.save_learnable_traces,
+    DirectorTools.update_specialist_skills
 ]
 
 director_agent = create_agent(
@@ -153,6 +155,13 @@ director_agent = create_agent(
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
     state_schema=MultiAgentState,
-    middleware=[apply_step_config],
-    checkpointer=checkpointer
+    middleware=[
+        apply_step_config,
+        FilesystemFileSearchMiddleware(
+            root_path="src/skills/distribution_skills",
+            use_ripgrep=True,
+        ),
+    ],
+    checkpointer=checkpointer,
+    store=shared_store
 )

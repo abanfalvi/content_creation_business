@@ -1,7 +1,7 @@
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from langchain.tools import tool, ToolRuntime
-from typing import Literal
+from typing import Literal, Optional
 import uuid
 
 from .state import MultiAgentState
@@ -14,6 +14,8 @@ class DirectorTools:
 
     @tool("draft_sm_content", description="Draft the post promoting the next episode for social media")
     def call_sm_writer_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
+        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "sm_writer_agent"})
+        query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
         result = sm_writer_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
         return Command(
             update={
@@ -29,6 +31,8 @@ class DirectorTools:
 
     @tool("publish_sm_post", description="Publish the post to social media")
     def call_publisher_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
+        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "publisher_agent"})
+        query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
         result = publisher_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
 
         return Command(
@@ -66,31 +70,41 @@ class DirectorTools:
         return agent_prompt
 
     @tool
-    def save_learnable_traces(book_title: str, success_trace: bool, title: str, description: str, content: str, runtime: ToolRuntime[None, MultiAgentState]):
+    def update_specialist_skills(agent_name: Literal["sm_writer_agent", "publisher_agent"], skill_name: str, updated_skill: str) -> str:
+        "Use this tool when you need to refine any of the skills your specialist agents are using because they still produced undesired step even though there is a skill about it"
+        path = f"src/skills/distribution_skills/{agent_name}/{skill_name}.md"
+        with open(path, "w") as f:
+            f.write(updated_skill)
+        return f"{skill_name} under {agent_name} as been updated successfully"
+
+    @tool
+    def save_learnable_traces(success_trace: bool, title: str, description: str, content: Optional[str], avoid: Optional[str], prefer: Optional[str], runtime: ToolRuntime[None, MultiAgentState]):
         """
-        Store both positive and negative exemplary traces that can be used for improving the specialist agents
+        Store both positive and undesired exemplary traces that can be used for improving the specialist agents
         
         Args:
-        book_title = name of the book that is being processed
-        success_trace = whether the current input is to reinforce a behaviour (True) or serve as a negative example (False)
-        title = a concise summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
-        description = one-sentence overview of the item's purpose
-        content = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences
+        book_title: str = name of the book that is being processed
+        success_trace: bool = whether the current input is to reinforce a behaviour (True) or serve as a negative example (False)
+        title: str = a concise summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
+        description: str = one-sentence overview of the item's purpose
+        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences (Use this for desired steps that should be reinforced)
+        avoid: str = description of what should be avoided and when (Use this only when you want to add undesired trace)
+        prefer: str = description of what should be done instead of the behaviour that should be avoided (Use this only when you want to add undesired trace)
 
         Output:
         Confirmation that your input has been saved to the persistent local store.
         """
         if success_trace:
-            runtime.store.put((book_title, "distribution_traces"), str(uuid.uuid4()), {
+            runtime.store.put(("distribution_traces",), str(uuid.uuid4()), {
                 "type": "success",
                 "active_agent": runtime.state.get("active_agent"),
                 "Title": title, "Description": description, "Content": content,
             })
             return "Successful trace has been saved!"
         else:
-            runtime.store.put((book_title, "distribution_traces"), str(uuid.uuid4()), {
+            runtime.store.put(("distribution_traces",), str(uuid.uuid4()), {
                 "type": "failure",
                 "active_agent": runtime.state.get("active_agent"),
-                "Title": title, "Description": description, "Content": content,
+                "Title": title, "Description": description, "Avoid": avoid, "Prefer": prefer
             })
-            return "Failed trace has been saved!"
+            return "Undesired trace has been saved!"

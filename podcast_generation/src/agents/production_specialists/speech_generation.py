@@ -4,6 +4,7 @@ import opik
 import re
 from pydub import AudioSegment
 import base64
+from typing import Dict
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
@@ -47,12 +48,12 @@ def build_episode(script_path: str, voice_map: dict[str, str], output_path: str)
     episode.export(output_path, format="mp3")
     return output_path
 
-def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str) -> tuple[str, RubricScores | None]:
+def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, undesired_steps: Dict[str, str]) -> tuple[str, RubricScores | None]:
     with open(audio_path, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode()
 
     message = HumanMessage(content=[
-        {"type": "text", "text": f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. \n\n The following script was used:\n {script}"},
+        {"type": "text", "text": f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. \n\n The following script was used:\n {script} \n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"},
         {
             "type": "audio",
             "base64": audio_b64,
@@ -71,9 +72,14 @@ def generate_podcast_audio_node(state: VoiceWorkflowState) -> dict:
         )
     return {"audio_result": path}
 
-def call_audio_engineer_agent_node(state: VoiceWorkflowState, *, config: RunnableConfig) -> dict:
+def call_audio_engineer_agent_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
-    _, rubric_scores = call_audio_engineer_agent(state["audio_result"], script=state["script"], thread_id=audio_engineer_thread_id)
+    _, rubric_scores = call_audio_engineer_agent(
+        state["audio_result"], 
+        script=state["script"], 
+        thread_id=audio_engineer_thread_id, 
+        undesired_steps=store.search(("production_traces",), filter={"type": "failure"})
+    )
 
     return {"episode_result": rubric_scores["final_audio_path"], "rubric_scores": rubric_scores}
 

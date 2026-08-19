@@ -1,7 +1,7 @@
 1. **Build a fixed, observable harness first:** planner/orchestrator, specialist agents, tools, shared state, checkpoints (saving the state of a long-running agent workflow at important points) + HITL, retries, and a verifier.
 2. **Add structured memory:** retain goals, decisions, artifacts, errors, successful procedures, and compact summaries. Do not simply append all raw conversation.
 3. **Add intra-task reflection:** use Reflexion-like lessons, branch-and-evaluate planning, and explicit recovery from failed tool calls.
-4. **Add reusable skills:** follow the Voyager pattern by turning verified successful procedures into versioned skills that can be retrieved later.
+4. **Add reusable skills:** follow the Voyager pattern by turning verified successful procedures into versioned skills that can be retrieved later. Skills should be improved later given the results of the rollouts. If the skill led to a failure, undesired step -> update the skill
 5. **Add a meta-agent:** mine failures from traces and propose small changes to prompts, routing, tool selection, context management, or retry policies.
 6. **Validate every candidate:** run regression tasks, safety checks, cost/latency checks, and task-specific verifiers before promotion. Keep the previous version for rollback.
 7. **Only then explore recursive improvement:** allow the improvement procedure itself to propose changes to the harness optimizer, but keep execution sandboxed and promotion gated.
@@ -43,3 +43,7 @@ Use of flat memory (ideas):
     Knowledge Vault: exact, sensitive facts that should be preserved verbatim.
     ---------------------------------------------------------------------------------
     Construct a structured memory note from LLM interactions -> 
+
+
+# In context meta learning
+To the unsuccessful steps, add how it should have been handled and attach this to the prompt of the model to take into account when it finds itself in this situation again

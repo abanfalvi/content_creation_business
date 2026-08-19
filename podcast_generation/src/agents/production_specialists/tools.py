@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import os, uuid, frontmatter
 import base64
 from pathlib import Path
-from typing import Literal, List, Tuple
+from typing import Literal, List, Tuple, Optional
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
@@ -145,35 +145,39 @@ class AudioEngineerTools:
         else:
             return "No skills available yet!"
 
-class LessonsLearnedExtracterAgentTools:
+class LessonsLearnedExtracterAgentTools: # LLExtractorState
 
     @tool
-    def save_learnable_traces(book_title: str, success_trace: bool, title: str, description: str, content: str, runtime: ToolRuntime[None, LLExtractorState]):
+    def save_learnable_traces(success_trace: bool, title: str, description: str, content: Optional[str], avoid: Optional[str], prefer: Optional[str], runtime: ToolRuntime[None, LLExtractorState]):
         """
-        Store both positive and negative exemplary traces that can be used for improving the specialist agents
+        Store both positive and undesired exemplary traces that can be used for improving the specialist agents
         
         Args:
         book_title: str = name of the book that is being processed
         success_trace: bool = whether the current input is to reinforce a behaviour (True) or serve as a negative example (False)
         title: str = a concise summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
         description: str = one-sentence overview of the item's purpose
-        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences
+        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences (Use this for desired steps that should be reinforced)
+        avoid: str = description of what should be avoided and when (Use this only when you want to add undesired trace)
+        prefer: str = description of what should be done instead of the behaviour that should be avoided (Use this only when you want to add undesired trace)
 
         Output:
         Confirmation that your input has been saved to the persistent local store.
         """
         if success_trace:
-            runtime.store.put((book_title, "production_traces"), str(uuid.uuid4()), {
+            runtime.store.put(("production_traces",), str(uuid.uuid4()), {
                 "type": "success",
+                "active_agent": "audio_engineer_agent",
                 "Title": title, "Description": description, "Content": content,
             })
             return "Successful trace has been saved!"
         else:
-            runtime.store.put((book_title, "production_traces"), str(uuid.uuid4()), {
+            runtime.store.put(("production_traces",), str(uuid.uuid4()), {
                 "type": "failure",
-                "Title": title, "Description": description, "Content": content,
+                "active_agent": "audio_engineer_agent",
+                "Title": title, "Description": description, "Avoid": avoid, "Prefer": prefer
             })
-            return "Failed trace has been saved!"
+            return "Undesired trace has been saved!"
 
     @staticmethod
     def extract_learnable_traces(thread_id: str, agent):

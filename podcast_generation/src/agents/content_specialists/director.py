@@ -4,7 +4,7 @@ import sqlite3
 from langchain.agents import create_agent
 from langchain.agents import AgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, wrap_tool_call, SummarizationMiddleware
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, FilesystemFileSearchMiddleware, SummarizationMiddleware
 from langgraph.graph import StateGraph, START, END
 from langchain_openrouter import ChatOpenRouter
 
@@ -153,7 +153,8 @@ all_tools = [
     DirectorTools.call_script_drafter_agent,
     DirectorTools.read_subagents_system_prompt,
     DirectorTools.edit_subagents_system_prompt,
-    DirectorTools.save_learnable_traces
+    DirectorTools.save_learnable_traces,
+    DirectorTools.update_specialist_skills
 ]
 
 director_agent = create_agent(
@@ -166,6 +167,10 @@ director_agent = create_agent(
         HumanInTheLoopMiddleware(
             interrupt_on={"human_review": {"allowed_decisions": ["approve", "reject"]}},
             description_prefix="Final script pending approval",
+        ),
+        FilesystemFileSearchMiddleware(
+            root_path="src/skills/distribution_skills",
+            use_ripgrep=True,
         ),
     ],
     checkpointer=checkpointer,
