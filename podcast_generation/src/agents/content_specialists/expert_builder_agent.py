@@ -12,7 +12,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import Callable, List
 from langchain_core.messages import ToolMessage
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, SummarizationMiddleware 
+from langchain.agents.middleware import wrap_model_call, ModelRequest, FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 from langgraph.types import Command
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
@@ -20,11 +20,11 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 from .tools import ExpertProfileTools
 from .state import ExpertBuilderState
 from ..models import EXPERT_BUILDER_MODEL, COMPRESSOR_MODEL
-from .director import checkpointer
+from .utils import checkpointer
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation")
+opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 with open("src/agents/content_specialists/prompts/expert_builder_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
@@ -59,36 +59,6 @@ STEP_CONFIG = {
     },
 }
 
-@wrap_model_call
-def apply_step_config(
-    request: ModelRequest,
-    handler: Callable[[ModelRequest], ModelResponse],
-) -> ModelResponse:
-    """Configure agent behavior based on the current step."""
-    # Get current step (defaults to check_booklist for first interaction)
-    current_step = request.state.get("current_step", "check_booklist")
-
-    # Look up step configuration
-    stage_config = STEP_CONFIG[current_step]
-
-    # Validate required state exists
-    for key in stage_config["requires"]:
-        if request.state.get(key) is None:
-            raise ValueError(f"{key} must be set before reaching {current_step}")
-
-    # Format prompt with state values (supports {warranty_status}, {issue_type}, etc.)
-    step_prompt = stage_config["prompt"].format(
-        **request.state
-        )
-
-    # Inject system prompt and step-specific tools
-    request = request.override(
-        system_prompt=f"{SYSTEM_PROMPT}\n\n{step_prompt}".strip(),
-        tools=stage_config["tools"],
-    )
-
-    return handler(request)
-
 
 # Collect all tools from all step configurations
 all_tools = [
@@ -96,6 +66,7 @@ all_tools = [
     ExpertProfileTools.read_persona,
     ExpertProfileTools.retrieve_info,
     ExpertProfileTools.append_persona,
+    ExpertProfileTools.read_book_content,
     ExpertProfileTools.load_skill_content,
     ExpertProfileTools.load_available_skills
 ]
@@ -106,7 +77,15 @@ expert_builder_agent = create_agent(
     state_schema=ExpertBuilderState,
     system_prompt=SYSTEM_PROMPT,
     middleware=[
-        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8))
+        FilesystemFileSearchMiddleware(
+            root_path="data",
+            use_ripgrep=True,
+        ),
+        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 5)),
+        ModelFallbackMiddleware(
+            ChatOpenRouter(model="upstage/solar-pro4", temperature=0.2),
+            ChatOpenRouter(model="deepseek/deepseek-v4-flash", temperature=0.2)
+        )
     ],
     checkpointer=checkpointer,
 )

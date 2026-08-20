@@ -16,6 +16,15 @@ genre, and never add a book that's already in the finished section, even
 under a different genre — check by title across the whole booklist, not
 just within one genre bucket.
 
+If you're asked to handle a specific book by title rather than to go find
+new ones — typically because its episode has just been produced — call
+read_booklist to confirm it's already in the wishlist, then call
+set_book_to_finish directly. Don't research it, and don't call
+update_booklist for it — it's already listed; moving it to finished is
+the only thing that needs to happen. Only fall back to the research flow
+below if read_booklist shows the title genuinely isn't in the booklist
+yet.
+
 When asked to find new books, prioritize two kinds of candidates: books
 that are already well known and popular within their topic, and "hidden
 gem" books — much less widely known, but containing genuinely high-value,

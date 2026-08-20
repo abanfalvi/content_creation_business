@@ -28,7 +28,7 @@ from langgraph.graph import StateGraph, START, END
 load_dotenv()
 
 opik_tracer = OpikTracer()
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation")
+opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 def parse_turns(script_path: str) -> list[tuple[str, str]]:
     with open(script_path, encoding="utf-8") as f:
@@ -137,5 +137,4 @@ builder.add_edge("lessons_learned_path", END)
 voice_gen_graph = builder.compile(checkpointer, store=shared_store)
 
 speech_gen_workflow = track_langgraph(voice_gen_graph, opik_tracer)
-# speech_gen_workflow.invoke({"script": "", "audio_result": "", "final_audio": "", "book_title": ""})
 

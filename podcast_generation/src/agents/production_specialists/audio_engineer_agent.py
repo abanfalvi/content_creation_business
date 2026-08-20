@@ -19,7 +19,7 @@ from .utils import checkpointer
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation")
+opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 with open(r"src\agents\production_specialists\prompts\audio_engineer_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()

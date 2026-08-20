@@ -13,8 +13,8 @@ DIRECTOR_MODEL = "deepseek/deepseek-v4-flash"
 AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5"
 
 # Distribution specialists
-SM_WRITER_MODEL = "nvidia/nemotron-3.5-lightning"
-PUBLISHER_MODEL = "qwen/qwen3.7-flash"
+SM_WRITER_MODEL = "qwen/qwen3.7-flash"
+PUBLISHER_MODEL = "nvidia/nemotron-3.5-lightning"
 DISTRIBUTION_DIRECTOR_MODEL = "deepseek/deepseek-v4-flash"
 
 # Compressor Model

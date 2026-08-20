@@ -8,6 +8,8 @@ DirectorStep = Literal["call_book_selection_agent", "call_expert_builder_agent",
 class MultiAgentState(AgentState):
     """State for the director's multi-agent workflow."""
     active_agent: NotRequired[DirectorStep]
+    system_prompt_read: NotRequired[bool]
+    book_title: NotRequired[str]
 
 # Book selection agent
 BookSelectionStep = Literal["check_booklist", "find_books", "update_booklist"]
@@ -23,6 +25,7 @@ class ExpertBuilderState(AgentState):
     """State for the expert builder agent workflow."""
     current_step: NotRequired[ExpertBuilderStep]
     persona_read: NotRequired[bool]
+    book_title: NotRequired[str]
 
 # Script drafter agent
 ScriptDrafterStep = Literal["edit_script", "read_personas", "retrieve_content"]
@@ -31,4 +34,5 @@ class ScriptDrafterState(AgentState):
     """State for the script drafter agent workflow."""
     current_step: NotRequired[ScriptDrafterStep]
     script_read: NotRequired[bool]
+    book_title: NotRequired[str]
 

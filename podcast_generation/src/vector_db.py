@@ -11,7 +11,7 @@ import requests
 from openrouter import OpenRouter
 from openrouter.errors import TooManyRequestsResponseError
 import os
-import time
+import time, json, math
 import zipfile
 import io
 import difflib
@@ -28,6 +28,8 @@ from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openrouter import ChatOpenRouter
+
+from .agents.content_specialists.utils import get_book_path
 
 load_dotenv()
 
@@ -116,11 +118,12 @@ def parse_pdf(filepath, book_name, page_ranges):
     except Exception as err:
         print(err)
 
-def save_markdown(zip_url: str, output_path: str):
+def save_markdown(zip_url: str, output_path: str, append: bool = False):
     res = requests.get(zip_url)
     with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
         md_name = next(n for n in zf.namelist() if n.endswith(".md"))
-        with zf.open(md_name) as f, open(output_path, "wb") as out:
+        mode = "ab" if append and os.path.exists(output_path) else "wb"
+        with zf.open(md_name) as f, open(output_path, mode) as out:
             out.write(f.read())
 
 async def create_chunk_surrounding_summaries(chunks: List[Document]) -> List[Document]:
@@ -129,7 +132,7 @@ async def create_chunk_surrounding_summaries(chunks: List[Document]) -> List[Doc
         prev = chunks[idx-1] if idx != 0 else ""
         next = chunks[idx+1] if idx != len(chunks) - 1 else "" 
         model = ChatOpenRouter(model="upstage/solar-pro4", temperature=0.1, max_tokens=1024)
-        prompt = f"Summarise these sections from a book that surrounds the current chunk, so the agent will have enough information in which context it is located. \n\n Previous section: {prev}\n Following section: {next}"
+        prompt = f"Summarise these sections from a book that surrounds the current chunk, so the agent will have enough information in which context it is located. Return only the summary! \n\n Previous section: {prev}\n Following section: {next}"
         summary = await model.ainvoke([("user", prompt)])
         chunks[idx].metadata['context_summary'] = summary.content
     return chunks
@@ -190,6 +193,7 @@ async def chunk_document(md_path: str, book_title: str, author: str):
     
     recursive_splitter = RecursiveCharacterTextSplitter(separators, is_separator_regex=True, chunk_size=2048, add_start_index=True)
     splits = recursive_splitter.split_documents([book_doc])
+    print("Total number of splits created: ", len(splits))
     chunks = await create_chunk_surrounding_summaries(splits)
 
     for idx, boundary in enumerate(boundaries):
@@ -209,13 +213,51 @@ def populate_vector_db(
     chunks: List[Document],
     vector_store: Chroma = vector_store,
     batch_size: int = 6,
-    pause_seconds: float = 40,
+    pause_seconds: float = 10,
 ) -> None:
     for idx in tqdm(range(0, len(chunks), batch_size)):
         batch = chunks[idx: idx + batch_size]
         vector_store.add_documents(batch)
         if idx + batch_size < len(chunks):
             time.sleep(pause_seconds)
+
+async def preprocessing_pipeline(book_genre: str, book_name: str, end_page: int) -> str:
+    with open("src/book_list.json", "r") as f:
+        data = json.dumps(f.read())
+    path_found = False
+    for genre, books in data["list_of_books"]["wishlist"]:
+        if genre == book_genre:
+            for book in books:
+                if book["title"] == book_name:
+                    book_title = book['title']
+                    book_author = book['author']
+                    filepath = book['filepath']
+                    if filepath:
+                        path_found = True
+                        break
+                    else:
+                        return "Filepath has not been provided in src/book_list.json"
+        if path_found:
+            break
+    book_name = get_book_path(book_name)
+    if end_page < 200:
+        page_ranges = f"1-{str(end_page)}"
+        save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md")
+    else:
+        n = math.ceil(end_page / 200)
+        for run in range(n):
+            if run == 0:
+                page_ranges = f"1-200"
+                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md")
+            else:
+                start_page = str(200*run + 1)
+                last_page = str(min(200*(run+1), end_page))
+                page_ranges = f"{start_page}-{last_page}"
+                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md", append=True)
+
+    book_chunks = await chunk_document(md_path=f"data/{book_name}/{book_name}_book_content.md", book_title=book_title, author=book_author)
+    populate_vector_db(book_chunks)
+    return f"{book_name} as been preprocessed successfully!"
 
 def apply_hdbscan_clustering(embeddings: List[List[float]]):
     X = np.array(embeddings)

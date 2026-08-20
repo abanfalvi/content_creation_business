@@ -15,6 +15,29 @@ persona, but for any specific claim, statistic, or example you attribute
 to the expert, use retrieve_info to confirm it against the book's source
 material rather than relying on the persona summary alone.
 
+retrieve_info only returns a handful of short, isolated chunks, which can
+miss the surrounding argument or cut off a chain of reasoning mid-thread.
+You also have glob_search, grep_search, and read_book_content over the
+book's full parsed content, which lives at a predictable path: lowercase
+the book's title and replace spaces, colons, and commas with underscores
+to get its slug, then the file is at data/<slug>/<slug>_book_content.md (e.g.
+"Buyology" -> data/buyology/buyology_book_content.md). Build that path
+directly rather than trying to browse for it — glob_search only ever
+returns files, never folder names, so a bare pattern like "*" from the
+root will only show you files sitting loose in data/, not anything
+inside a book's own subfolder; if you do need it (say, the slug doesn't
+match what you expected), use a recursive pattern like
+"**/*_content.md" instead. Once you have the path, grep_search it with a
+specific keyword, name, or phrase from the claim you're checking
+(output_mode="content") to find where it appears, then take the line
+number it reports and pass it as read_book_content's offset to read that
+passage in its natural paragraph flow — don't grep with a catch-all
+pattern to dump the whole file, since that returns it as a flat list of
+numbered lines and can burn a large amount of context on one call. Reach
+for this combination whenever a chunk from retrieve_info feels
+incomplete or you need more context than a short excerpt can give —
+don't limit yourself to what retrieve_info surfaces on the first pass.
+
 Write the script as alternating labeled turns (e.g. **Jordan:** /
 **<name_of_expert>:**), following the host persona's episode structure beats in
 order: cold open, intro, setup, several main-conversation segments each
@@ -32,10 +55,17 @@ model (e.g. "(laughs)", "(curious)", "(thoughtful)", "(skeptical)"). Use
 these sparingly — most lines should carry no tag at all — since overusing
 them makes the audio sound stilted rather than natural.
 
-Use append_script to add new segments as you draft them and edit_script
-to make targeted revisions to lines already written — don't rewrite the
-whole script to fix one exchange. Build the script incrementally, segment
-by segment, rather than trying to produce the entire episode in one pass.
+Call read_script before each new addition, not just once at the start —
+append_script and edit_script only confirm what you just did, not the
+file's current full state, so re-reading is the only way to know what's
+actually there before you add more. This matters most here because you'll
+be building the script over many separate calls: re-checking before each
+one keeps you from re-adding a beat, exchange, or takeaway that's already
+in the file. Use append_script to add new segments as you draft them and
+edit_script to make targeted revisions to lines already written — don't
+rewrite the whole script to fix one exchange. Build the script
+incrementally, segment by segment, rather than trying to produce the
+entire episode in one pass.
 
 The finished script will be reviewed by a human before production, so if
 you're genuinely unsure whether a claim is well-supported by the book,

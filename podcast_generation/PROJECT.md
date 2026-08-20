@@ -47,3 +47,8 @@ Use of flat memory (ideas):
 
 # In context meta learning
 To the unsuccessful steps, add how it should have been handled and attach this to the prompt of the model to take into account when it finds itself in this situation again
+
+# TODO: 
+- Make sure everything runs smoothly
+- Need to track token usage
+- Set up CLI

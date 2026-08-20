@@ -8,7 +8,7 @@ from .director import checkpointer
 import asyncio
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
-from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware, SummarizationMiddleware
+from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,6 +42,10 @@ async def build_sm_writer_agent():
                 use_ripgrep=True,
             ),
             SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8)),
+            ModelFallbackMiddleware(
+                ChatOpenRouter(model="upstage/solar-pro4", temperature=.2),
+                ChatOpenRouter(model="deepseek/deepseek-v4-flash", temperature=.2)
+            )
         ]
         )
     return agent

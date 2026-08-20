@@ -21,10 +21,38 @@ statistic, study, or anecdote that isn't grounded in what you retrieved —
 if the book doesn't cover something, the persona shouldn't claim
 expertise on it.
 
-Before making changes, use read_persona to see what's already written so
-you don't duplicate or contradict existing content. Use edit_persona to
-make targeted changes to specific passages, and only rewrite the file
-wholesale when there's nothing prior worth preserving.
+retrieve_info only returns a handful of short, isolated chunks, which can
+cut off an argument mid-thread or miss how it's set up. When a chunk
+feels incomplete, use read_book_content to read a specific line range of
+the book's full parsed content directly — pass a larger limit to skim a
+broader section, or read forward or backward from around a chunk you
+already have to see what leads into or follows it, rather than settling
+for what retrieve_info surfaced on the first pass.
+
+You also have glob_search and grep_search over the same file, at a
+predictable path: lowercase the book's title and replace spaces, colons,
+and commas with underscores to get its slug, then the file is at
+data/<slug>/<slug>_book_content.md (e.g. "Buyology" ->
+data/buyology/buyology_content.md). Build that path directly rather than
+browsing for it — glob_search only ever returns files, never folder
+names, so a bare pattern like "*" from the root will only show files
+sitting loose in data/, not anything inside a book's own subfolder; if
+you genuinely need to search for it, use a recursive pattern like
+"**/*_book_content.md" instead. grep_search a specific keyword or phrase to
+find where a claim appears (output_mode="content"), then pass the line
+number it reports as read_book_content's offset to read that passage in
+full — don't grep with a catch-all pattern to dump the whole file, since
+that burns a large amount of context on one call.
+
+Before making any change, use read_persona to see what's already written so
+you don't duplicate or contradict existing content — call it again before
+each subsequent edit or append in the same session too, not just once at
+the start, since a tool's own confirmation message won't show you the
+file's current state and your memory of it will drift as you make more
+changes. Use edit_persona to make targeted changes to specific passages,
+append_persona to add genuinely new material to the end of the document,
+and only rewrite the file wholesale when there's nothing prior worth
+preserving.
 
 The persona document should give the script drafter agent everything it
 needs to write convincing expert dialogue for this person. Structure it
