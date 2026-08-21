@@ -99,7 +99,8 @@ class SMWriterAgentTools:
     @tool
     def load_available_skills() -> List[Tuple[str, str]] | str:
         "Load the name and descriptions of the available skills"
-        all_skills = list(Path("src/skills/distribution_skills/sm_writer_agent/").iterdir())
+        os.makedirs("src/skills/distribution_skills/sm_writer_agent", exist_ok=True)
+        all_skills = list(Path("src/skills/distribution_skills/sm_writer_agent/").glob("*.md"))
         if all_skills:
             all_metadata = []
             for skill in all_skills:
@@ -226,7 +227,8 @@ class PublisherAgentTools:
     @tool
     def load_available_skills() -> List[Tuple[str, str]] | str:
         "Load the name and descriptions of the available skills"
-        all_skills = list(Path("src/skills/distribution_skills/publisher_agent/").iterdir())
+        os.makedirs("src/skills/distribution_skills/publisher_agent", exist_ok=True)
+        all_skills = list(Path("src/skills/distribution_skills/publisher_agent/").glob("*.md"))
         if all_skills:
             all_metadata = []
             for skill in all_skills:

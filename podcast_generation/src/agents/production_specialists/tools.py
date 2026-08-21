@@ -9,6 +9,16 @@ from langgraph.types import Command
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
+from static_ffmpeg import run as static_ffmpeg_run
+
+# Some pydub internals (e.g. mediainfo_json, used by from_mp3/from_file)
+# re-resolve ffmpeg/ffprobe via a fresh PATH search on every call instead of
+# reading AudioSegment.converter/.ffprobe, so those attributes alone aren't
+# enough to pin it. Putting static-ffmpeg's venv-local binaries on PATH
+# before pydub is imported covers every pydub code path, not just some.
+_ffmpeg_path, _ffprobe_path = static_ffmpeg_run.get_or_fetch_platform_executables_else_raise()
+os.environ["PATH"] = os.path.dirname(_ffmpeg_path) + os.pathsep + os.environ.get("PATH", "")
+
 from pydub import AudioSegment
 from pydub.silence import detect_silence, split_on_silence
 from pydub.effects import normalize as pydub_normalize
@@ -16,6 +26,12 @@ from pydub.effects import normalize as pydub_normalize
 from .state import LLExtractorState
 
 load_dotenv()
+
+# Belt-and-suspenders: also pin the class attributes explicitly for the
+# pydub code paths that do read them directly.
+AudioSegment.converter = _ffmpeg_path
+AudioSegment.ffmpeg = _ffmpeg_path
+AudioSegment.ffprobe = _ffprobe_path
 
 class VoiceAgentsTools:
 
@@ -63,19 +79,27 @@ class AudioEngineerTools:
         })
 
     @tool
-    def listen_audio(input_path: str):
+    def listen_audio(input_path: str, runtime: ToolRuntime) -> Command:
         "Listen to the current version of the podcast clip"
         with open(input_path, "rb") as f:
-            audio_b64 = base64.b64encode(f.read()).decode()
-    
-        return ToolMessage(content=[
-            {"type": "text", "text": "The current podcast clip is the following"},
-            {
-                "type": "audio",
-                "base64": audio_b64,
-                "mime_type": "audio/mpeg",
-            },
-        ])
+            audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        return Command(update={
+            "messages": [
+                # tool-role messages can only carry plain text on this API — the
+                # audio itself has to travel in a separate user-role message
+                # right after, which is the only role that accepts audio content.
+                ToolMessage(content="Audio loaded — see the attached clip below.", tool_call_id=runtime.tool_call_id),
+                HumanMessage(content=[
+                    {"type": "text", "text": f"The current podcast clip ({input_path}) is the following:"},
+                    {
+                        "type": "audio",
+                        "base64": audio_b64,
+                        "mime_type": "audio/mpeg",
+                    },
+                ]),
+            ],
+        })
 
     @tool
     def generate_audio(script: str, host_or_expert: Literal["Host", "Expert"], output_path: str):
@@ -133,9 +157,10 @@ class AudioEngineerTools:
         return post.content
 
     @tool
-    def load_available_skills() -> List[Tuple[str, str]] | str:
+    def load_available_skills() -> List[dict] | str:
         "Load the name and descriptions of the available skills"
-        all_skills = list(Path(r"src\skills\production_skills").iterdir())
+        os.makedirs("src/skills/production_skills", exist_ok=True)
+        all_skills = list(Path(r"src\skills\production_skills").glob("*.md"))
         if all_skills:
             all_metadata = []
             for skill in all_skills:
@@ -145,7 +170,7 @@ class AudioEngineerTools:
         else:
             return "No skills available yet!"
 
-class LessonsLearnedExtracterAgentTools: # LLExtractorState
+class LessonsLearnedExtracterAgentTools:
 
     @tool
     def save_learnable_traces(success_trace: bool, title: str, description: str, content: Optional[str], avoid: Optional[str], prefer: Optional[str], runtime: ToolRuntime[None, LLExtractorState]):
@@ -191,12 +216,12 @@ class LessonsLearnedExtracterAgentTools: # LLExtractorState
             prev_len = len(messages)
 
             for msg in new_messages:
-                active_agent = snapshot.values.get("active_agent")
+                active_agent = "audio_engineer_agent"
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                     for call in msg.tool_calls:
                         trace.append({
                             "step": snapshot.metadata["step"],
-                            "active_agent": snapshot.values.get("active_agent"),
+                            "active_agent": active_agent,
                             "action": "called_tool",
                             "tool": call["name"],
                             "args": call["args"],
@@ -204,14 +229,14 @@ class LessonsLearnedExtracterAgentTools: # LLExtractorState
                 elif type(msg).__name__ == "ToolMessage":
                     trace.append({
                         "step": snapshot.metadata["step"],
-                        "active_agent": snapshot.values.get("active_agent"),
+                        "active_agent": active_agent,
                         "action": "tool_result",
                         "content": msg.content,
                     })
                 elif type(msg).__name__ == "AIMessage":
                     trace.append({
                         "step": snapshot.metadata["step"],
-                        "active_agent": snapshot.values.get("active_agent"),
+                        "active_agent": active_agent,
                         "reasoning": "".join(b["reasoning"] for b in msg.content_blocks if b["type"] == "reasoning"),
                         "text": "".join(b["text"] for b in msg.content_blocks if b["type"] == "text"),
 

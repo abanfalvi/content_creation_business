@@ -100,7 +100,7 @@ def apply_step_config(
     handler: Callable[[ModelRequest], ModelResponse],
 ) -> ModelResponse:
     """Configure agent behavior based on the current step."""
-    active_agent = request.state.get("active_agent", "call_sm_writer_agent")
+    active_agent = request.state.get("active_agent")
     thread_id = request.runtime.execution_info.thread_id
 
     # Look up step configuration

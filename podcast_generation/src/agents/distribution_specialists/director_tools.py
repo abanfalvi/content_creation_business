@@ -16,7 +16,7 @@ class DirectorTools:
     def call_sm_writer_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "sm_writer_agent"})
         query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = sm_writer_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
+        result = sm_writer_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": f"{runtime.execution_info.thread_id}::sm_writer_agent"})
         return Command(
             update={
                 "messages": [
@@ -33,7 +33,7 @@ class DirectorTools:
     def call_publisher_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "publisher_agent"})
         query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = publisher_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": runtime.execution_info.thread_id})
+        result = publisher_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": f"{runtime.execution_info.thread_id}::publisher_agent"})
 
         return Command(
             update={

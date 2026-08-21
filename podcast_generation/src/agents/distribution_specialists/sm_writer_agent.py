@@ -38,7 +38,7 @@ async def build_sm_writer_agent():
         checkpointer=checkpointer,
         middleware=[
             FilesystemFileSearchMiddleware(
-                root_path="/data",
+                root_path="data",
                 use_ripgrep=True,
             ),
             SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8)),

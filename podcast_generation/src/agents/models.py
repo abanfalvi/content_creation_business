@@ -10,7 +10,7 @@ SCRIPT_DRAFTER_MODEL = "qwen/qwen3.7-flash"
 DIRECTOR_MODEL = "deepseek/deepseek-v4-flash"
 
 # Production specialists
-AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5"
+AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5" # google/gemini-2.5-flash-lite
 
 # Distribution specialists
 SM_WRITER_MODEL = "qwen/qwen3.7-flash"

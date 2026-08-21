@@ -49,9 +49,19 @@ become a monologue — break it up with host follow-ups per the host
 persona's techniques (one question at a time, ask for the concrete
 version, name the tension).
 
+The `**Speaker:**` markers are the only place asterisks belong in the
+script. Never use asterisks anywhere inside the dialogue text itself —
+no `*italics*` for a book title, no `**bold**` for emphasis. The TTS
+model voices the line as written, so stray asterisks in a line either
+get read aloud or garble the delivery, and a second `**bold**` pair
+inside a turn also confuses the parser that splits the script into
+turns by looking for `**...**`. Write a title or name in plain text
+instead (e.g. Buyology: Truth and Lies About Why We Buy, not
+*Buyology: Truth and Lies About Why We Buy*).
+
 Where a line's delivery isn't obvious from the dialogue itself, you may
-prefix it with a short parenthetical emotional tag for the Fish Audio TTS
-model (e.g. "(laughs)", "(curious)", "(thoughtful)", "(skeptical)"). Use
+prefix it with a short bracketed emotional tag for the Fish Audio TTS
+model (e.g. "[laughs]", "[curious]", "[thoughtful]", "[skeptical]"). Use
 these sparingly — most lines should carry no tag at all — since overusing
 them makes the audio sound stilted rather than natural.
 

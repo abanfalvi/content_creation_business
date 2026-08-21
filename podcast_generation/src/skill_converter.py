@@ -20,7 +20,7 @@ class SkillSchema(BaseModel):
 structured_model = skill_converter_model.with_structured_output(SkillSchema)  
 
 def convert_to_skill(skill_name: Literal["content_traces", "production_traces", "distribution_traces"], book_title: str):
-    successful_traces = shared_store.search((book_title, skill_name), filter={"type": "success"})
+    successful_traces = shared_store.search((skill_name,), filter={"type": "success"})
 
     for trace in successful_traces:
         converter_prompt = f"""

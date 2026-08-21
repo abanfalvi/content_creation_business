@@ -1,6 +1,6 @@
 
 from dotenv import load_dotenv
-import opik
+import opik, os
 import re
 from pydub import AudioSegment
 import base64
@@ -40,34 +40,46 @@ def build_episode(script_path: str, voice_map: dict[str, str], output_path: str)
     episode = AudioSegment.empty()
     silence = AudioSegment.silent(duration=300)
 
+    os.makedirs("./tmp", exist_ok=True)
     for i, (speaker, line) in enumerate(turns):
-        clip_path = f"./tmp/turn_{i}.mp3"
+        clip_path = f"tmp/turn_{i}.mp3" 
         VoiceAgentsTools.generate_audio(line.strip(), voice=voice_map[speaker], output_path=clip_path)
         episode += AudioSegment.from_mp3(clip_path) + silence
 
     episode.export(output_path, format="mp3")
     return output_path
 
-def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, undesired_steps: Dict[str, str]) -> tuple[str, RubricScores | None]:
+def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, undesired_steps: Dict[str, str], user_feedback: str = "") -> tuple[str, RubricScores]:
     with open(audio_path, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode()
 
+    with open(script, "r") as f:
+        script_text = f.read()
+
+    model_instruction = f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. \n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
+    if user_feedback:
+        model_instruction += f"\n\n The user did not approve the current version of the audio. Review the audio while taking into account their feedback: \n {user_feedback}"
+
     message = HumanMessage(content=[
-        {"type": "text", "text": f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. \n\n The following script was used:\n {script} \n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"},
-        {
-            "type": "audio",
-            "base64": audio_b64,
-            "mime_type": "audio/mpeg",
-        },
+        {"type": "text", "text": model_instruction},
     ])
-    result = audio_engineer_agent.invoke([message], config={"configurable": {"thread_id": thread_id}})
-    return result["messages"][-1].content, result.get("rubric_scores")
+    result = audio_engineer_agent.invoke({"messages": [message], "active_step": "edit_audio"}, config={"configurable": {"thread_id": thread_id}})
+
+    rubric_score = audio_engineer_agent.invoke(
+        {
+            "messages": [HumanMessage(content="You're done editing this pass — finalize your quality assessment now.")],
+            "active_step": "score_final_result",
+        },
+        config={"configurable": {"thread_id": thread_id}},
+    )
+    return rubric_score["messages"][-1].content, rubric_score.get("rubric_scores")
 
 
 def generate_podcast_audio_node(state: VoiceWorkflowState) -> dict:
+    os.makedirs(f"data/{state['book_title']}/audio_contents", exist_ok=True)
     path = build_episode(
         state["script"], 
-        voice_map={"Jordan": "536d3a5e000945adb7038665781a4aca", "Dr. Elias Thorne": "933563129e564b19a115bedd57b7406a"},
+        voice_map={"Jordan": "536d3a5e000945adb7038665781a4aca", state['expert_name']: "933563129e564b19a115bedd57b7406a"},
         output_path=f"data/{state['book_title']}/audio_contents/podcast_audio.mp3"
         )
     return {"audio_result": path}
@@ -75,10 +87,11 @@ def generate_podcast_audio_node(state: VoiceWorkflowState) -> dict:
 def call_audio_engineer_agent_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
     _, rubric_scores = call_audio_engineer_agent(
-        state["audio_result"], 
+        audio_path=state["audio_result"], 
         script=state["script"], 
         thread_id=audio_engineer_thread_id, 
-        undesired_steps=store.search(("production_traces",), filter={"type": "failure"})
+        undesired_steps=store.search(("production_traces",), filter={"type": "failure"}),
+        user_feedback=state["feedback"]
     )
 
     return {"episode_result": rubric_scores["final_audio_path"], "rubric_scores": rubric_scores}
