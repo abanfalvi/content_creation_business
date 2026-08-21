@@ -1,10 +1,12 @@
 from openrouter import OpenRouter, utils
 from dotenv import load_dotenv
-import os, frontmatter, time
+import os, frontmatter, time, re
 from pathlib import Path
 from typing import List, Tuple
-import base64, requests
+import base64, requests, dropbox
 from typing import Literal
+from dropbox.exceptions import ApiError
+
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
@@ -19,6 +21,7 @@ hf_token.create_repo(repo_id="abanfalvi/podcast-social-assets", repo_type="datas
 
 _spotify_token_cache = {"access_token": None, "expires_at": 0}
 
+dbx = dropbox.Dropbox(oauth2_access_token=os.environ.get("DROPBOX"))
 
 def _get_spotify_token() -> str:
     "Fetch (and cache) an app-only Spotify access token via the Client Credentials flow."
@@ -43,8 +46,8 @@ def _get_spotify_token() -> str:
 class SMWriterAgentTools:
 
     @tool
-    def generate_image(prompt: str, output_path: str, aspect_ratio: Literal["1:1", "1:2", "1:4", "2:1", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "9:16", "16:9"]) -> str:
-        "Generates image based on the provided prompt, and not every aspect ratio is available for every model"
+    async def generate_image_and_upload_canva(prompt: str, output_path: str, filename: str, aspect_ratio: Literal["1:1", "1:2", "1:4", "2:1", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "9:16", "16:9"], runtime: ToolRuntime) -> dict:
+        "Generates an image from the prompt and uploads it into Canva as an asset, ready to place in a design. Not every aspect ratio is available for every model. Filename should be without file type."
         with OpenRouter(api_key=os.getenv("OPENROUTER_API_KEY", "")) as open_router:
             res = open_router.images.generate(
                 model="krea/krea-2-medium-turbo",
@@ -55,39 +58,80 @@ class SMWriterAgentTools:
                 timeout_ms=60000,
                 retries=utils.RetryConfig("backoff", utils.BackoffStrategy(500, 5000, 1.5, 30000), False),
             )
+            full_output_path = f"data/{output_path}"
+            os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
             image_bytes = base64.b64decode(res.data[0].b64_json)
-            with open(output_path, "wb") as f:
+            with open(full_output_path, "wb") as f:
                 f.write(image_bytes)
 
-            hf_token.upload_file(
-                path_or_fileobj=output_path, 
-                path_in_repo=os.path.basename(output_path),
-                repo_id="abanfalvi/podcast-social-assets",
-                repo_type="dataset",
-            )
-            public_url = f"https://huggingface.co/datasets/abanfalvi/podcast-social-assets/resolve/main/{os.path.basename(output_path)}"
+            dbx.files_upload(image_bytes, f"/{filename}.png")
+            try:
+                shared_link = dbx.sharing_create_shared_link_with_settings(f"/{filename}.png")
+                url = shared_link.url
+            except ApiError as e:
+                if e.error.is_shared_link_already_exists():
+                    existing = dbx.sharing_list_shared_links(path=f"/{filename}.png", direct_only=True).links
+                    url = existing[0].url
+                else:
+                    raise
 
-        return public_url
+            direct_url = url.replace("?dl=0", "?raw=1")
+            # resolve/main redirects (302) to a signed CDN URL — Canva's fetcher
+            # checks for a 200 and won't follow redirects, so resolve it here.
+            # public_url = requests.head(hf_url, allow_redirects=True, timeout=15).url
+
+        upload_asset = next(t for t in runtime.tools if t.name == "upload-asset-from-url")
+        # print(public_url)
+        # time.sleep(25)
+        try:
+            return await upload_asset.ainvoke({
+                "url": direct_url,
+                "name": os.path.basename(output_path),
+                "user_intent": "Upload a generated promotional image for the podcast's Instagram post into Canva.",
+            })
+        except:
+            return f"Upload to Canva has been unsuccessful, but the image has been generated and saved to {full_output_path}"
 
     @tool
-    def download_export(url: str, output_path: str) -> str:
-        "Download an exported design from its temporary Canva URL and save it locally."
-        response = requests.get(url, timeout=30)
+    def get_script(runtime: ToolRuntime):
+        "Get the script for the episode to become familiar with content"
+        return runtime.state.get("script")
+
+    @tool
+    async def export_and_download_design(design_id: str, format: dict, output_path: str, runtime: ToolRuntime) -> str:
+        "Exports a Canva design and saves it locally in one step — no need to call export-design yourself or handle its temporary download URL. Call get-export-formats first to confirm a format this design actually supports."
+        export_design = next(t for t in runtime.tools if t.name == "export-design")
+        result = await export_design.ainvoke({
+            "design_id": design_id,
+            "format": format,
+            "user_intent": "Export the finished Instagram post design so it can be saved locally for human review.",
+        })
+
+        urls = re.findall(r"https?://\S+", str(result))
+        if not urls:
+            raise ValueError(f"export-design did not return a download URL: {result}")
+
+        response = requests.get(urls[0], timeout=30)
         response.raise_for_status()
-        with open(output_path, "wb") as f:
+        full_path = f"data/{output_path}"
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "wb") as f:
             f.write(response.content)
         return output_path
 
     @tool
     def save_post_text(output_path: str, text: str):
-        with open(output_path, "w") as f:
+        "Save the text content of the post. Use md format"
+        full_path = f"data/{output_path}"
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
             f.write(text)
         return "Post text successfully saved!"
 
     @tool
     def create_folder(folder_path: str, folder_name: str):
         "Tool to create a folder to save content locally"
-        path = os.mkdir(f"{folder_path}/{folder_name}")
+        path = os.makedirs(f"data/{folder_path}/{folder_name}", exist_ok=True)
         return path
 
     @tool

@@ -3,15 +3,21 @@
 from .mcp import get_canva_mcp
 from .tools import SMWriterAgentTools
 from ..models import SM_WRITER_MODEL, COMPRESSOR_MODEL
-from .director import checkpointer
+from .utils import checkpointer
+from .state import SMWriterState
 
 import asyncio
+import opik
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 from dotenv import load_dotenv
 
+from opik.integrations.langchain import OpikTracer, track_langgraph
+
 load_dotenv()
+
+opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 with open("src/agents/distribution_specialists/prompts/sm_writer_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
@@ -27,15 +33,17 @@ async def build_sm_writer_agent():
         ChatOpenRouter(model=SM_WRITER_MODEL, temperature=.2),
         tools=[
             *canva_tools, 
-            SMWriterAgentTools.generate_image, 
-            SMWriterAgentTools.download_export, 
-            SMWriterAgentTools.save_post_text, 
+            SMWriterAgentTools.generate_image_and_upload_canva,
+            SMWriterAgentTools.export_and_download_design,
+            SMWriterAgentTools.save_post_text,
             SMWriterAgentTools.create_folder,
             SMWriterAgentTools.load_available_skills,
-            SMWriterAgentTools.load_skill_content
+            SMWriterAgentTools.load_skill_content,
+            SMWriterAgentTools.get_script
         ],
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
+        state_schema=SMWriterState,
         middleware=[
             FilesystemFileSearchMiddleware(
                 root_path="data",
@@ -48,8 +56,15 @@ async def build_sm_writer_agent():
             )
         ]
         )
+    opik_tracer = OpikTracer()
+    agent = track_langgraph(agent, opik_tracer)
     return agent
 
 
-if __name__ == "__main__":
-    sm_writer_agent = asyncio.run(build_sm_writer_agent())
+_sm_writer_agent = None
+
+def get_sm_writer_agent():
+    global _sm_writer_agent
+    if _sm_writer_agent is None:
+        _sm_writer_agent = asyncio.run(build_sm_writer_agent())
+    return _sm_writer_agent

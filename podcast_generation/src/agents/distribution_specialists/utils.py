@@ -1,5 +1,6 @@
-import sqlite3
+import sqlite3, aiosqlite
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-conn = sqlite3.connect("./checkpoints/distribution_checkpoints.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
+conn = aiosqlite.connect("./checkpoints/distribution_checkpoints.db", check_same_thread=False)
+checkpointer = AsyncSqliteSaver(conn)

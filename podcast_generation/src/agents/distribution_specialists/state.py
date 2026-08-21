@@ -8,3 +8,7 @@ DirectorStep = Literal["call_sm_writer_agent", "call_publisher_agent", "review_p
 class MultiAgentState(AgentState):
     """State for the director's multi-agent workflow."""
     active_agent: NotRequired[DirectorStep]
+    script_path: str
+
+class SMWriterState(AgentState):
+    script: str

@@ -1,5 +1,7 @@
 
 import sqlite3
+from dotenv import load_dotenv
+import opik
 
 from langchain.agents import create_agent, AgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -9,12 +11,20 @@ from langchain_openrouter import ChatOpenRouter
 
 from typing import Literal, Callable
 
+from opik.integrations.langchain import OpikTracer, track_langgraph
+
 from .director_tools import DirectorTools
+from .publisher_agent import get_publisher_agent
+from .sm_writer_agent import get_sm_writer_agent
 from .prompts import DistributionDirectorPrompt
 from .state import MultiAgentState
 from ..models import DISTRIBUTION_DIRECTOR_MODEL
 from .utils import checkpointer
 from ...memory.memory_store import shared_store
+
+load_dotenv()
+
+opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 with open("src/agents/distribution_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
@@ -39,7 +49,7 @@ STEP_CONFIG = {
     # set current step/ active agent to this, when needed, during invoke method
     "edit_prompts": {
         "prompt": "",
-        "tools": [DirectorTools.edit_subagents_system_prompt, DirectorTools.read_subagents_system_prompt],
+        "tools": [DirectorTools.edit_subagents_system_prompt, DirectorTools.read_subagents_system_prompt, DirectorTools.update_specialist_skills],
         "requires": [],
     },
     "review_post": {
@@ -55,22 +65,35 @@ STEP_CONFIG = {
 
 }
 
-def extract_learnable_traces(thread_id: str, agent):
+def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str | None = None):
+    """Walk one graph's own checkpoint history, diffing `messages` between
+    consecutive snapshots, and tag each extracted entry with `tag_key`.
+
+    Pass `tag_value` for a sub-agent's own single-purpose thread, where
+    every entry belongs to that one agent. Leave it None for the
+    director's own multi-step thread, where the tag (`active_agent`)
+    varies snapshot to snapshot and gets read fresh from each one; in
+    that mode, snapshots missing `tag_key` entirely are skipped, since
+    they'd otherwise be sub-agent checkpoints leaking onto this thread.
+    """
     trace = []
     prev_len = 0
 
     history = list(agent.get_state_history({"configurable": {"thread_id": thread_id}}))
     for snapshot in reversed(history):
-        messages = snapshot.values.get("active_agent")
+        if tag_value is None and tag_key not in snapshot.values:
+            continue
+        messages = snapshot.values.get("messages", [])
         new_messages = messages[prev_len:]
         prev_len = len(messages)
+        tag = tag_value if tag_value is not None else snapshot.values.get(tag_key)
 
         for msg in new_messages:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for call in msg.tool_calls:
                     trace.append({
                         "step": snapshot.metadata["step"],
-                        "active_agent": snapshot.values.get("active_agent"),
+                        tag_key: tag,
                         "action": "called_tool",
                         "tool": call["name"],
                         "args": call["args"],
@@ -78,21 +101,34 @@ def extract_learnable_traces(thread_id: str, agent):
             elif type(msg).__name__ == "ToolMessage":
                 trace.append({
                     "step": snapshot.metadata["step"],
-                    "active_agent": snapshot.values.get("active_agent"),
+                    tag_key: tag,
                     "action": "tool_result",
                     "content": msg.content,
                 })
             elif type(msg).__name__ == "AIMessage":
                 trace.append({
                     "step": snapshot.metadata["step"],
-                    "active_agent": snapshot.values.get("active_agent"),
+                    tag_key: tag,
                     "reasoning": "".join(b["reasoning"] for b in msg.content_blocks if b["type"] == "reasoning"),
                     "text": "".join(b["text"] for b in msg.content_blocks if b["type"] == "text"),
-
-                    # "text": msg.text,
-                    # "reasoning": msg.reasoning,
                 })
     return trace
+
+
+# Maps the agent_name used by save_learnable_traces to (its own compiled
+# graph, the thread-id suffix director_tools.py invokes it with).
+SUB_AGENTS = {
+    "sm_writer_agent": (get_sm_writer_agent(), "sm_writer_agent"),
+    "publisher_agent": (get_publisher_agent(), "publisher_agent"),
+}
+
+
+def extract_learnable_traces(thread_id: str, agent):
+    trace = _extract_message_trace(agent, thread_id, "active_agent")
+    for agent_name, (sub_agent, thread_suffix) in SUB_AGENTS.items():
+        trace += _extract_message_trace(sub_agent, f"{thread_id}::{thread_suffix}", "agent_name", agent_name)
+    return trace
+
 
 @wrap_model_call
 def apply_step_config(
@@ -165,3 +201,6 @@ director_agent = create_agent(
     checkpointer=checkpointer,
     store=shared_store
 )
+
+opik_tracer = OpikTracer()
+director_agent = track_langgraph(director_agent, opik_tracer)

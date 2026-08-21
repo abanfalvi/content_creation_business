@@ -22,7 +22,8 @@ CANVA_NOT_ALLOWED_TOOLS = [
     "list-comments",
     "list-replies",
     "reply-to-comment",
-    "create-design-from-candidate"
+    # "create-design-from-candidate",
+    # "search-brand-templates"
 ]
 BUFFER_NOT_ALLOWED_TOOLS = [
     "get_account",
