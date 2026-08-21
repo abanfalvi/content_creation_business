@@ -40,7 +40,7 @@ class DirectorTools:
         undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "publisher_agent"})
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = await get_sm_writer_agent().ainvoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": f"{runtime.execution_info.thread_id}::publisher_agent"})
+        result = await get_publisher_agent().ainvoke({"messages": [{"role": "user", "content": query}]}, config={"thread_id": f"{runtime.execution_info.thread_id}::publisher_agent"})
 
         return Command(
             update={

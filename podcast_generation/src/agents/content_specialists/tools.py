@@ -9,7 +9,7 @@ from langchain_classic.retrievers.contextual_compression import (
 from langchain_core.documents import Document
 import json, frontmatter, os
 from dotenv import load_dotenv
-from typing import List, Tuple
+from typing import List
 from pathlib import Path
 
 from .state import BookSelectionState, ExpertBuilderState, ScriptDrafterState

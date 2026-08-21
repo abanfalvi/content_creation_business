@@ -1,17 +1,12 @@
 
-import sqlite3
 from dotenv import load_dotenv
 import opik
 
 from langchain.agents import create_agent
-from langchain.agents import AgentState
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, FilesystemFileSearchMiddleware, SummarizationMiddleware
-from langgraph.graph import StateGraph, START, END
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, FilesystemFileSearchMiddleware
 from langchain_openrouter import ChatOpenRouter
 
-from typing import Literal, Callable
-from typing_extensions import NotRequired
+from typing import Callable
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 

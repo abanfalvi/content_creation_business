@@ -25,7 +25,7 @@ import hdbscan
 
 from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_openrouter import ChatOpenRouter
 

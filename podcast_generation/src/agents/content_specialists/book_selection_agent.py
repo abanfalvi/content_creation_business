@@ -1,17 +1,10 @@
-import os
 from dotenv import load_dotenv
-import sqlite3
 import opik
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langgraph.checkpoint.sqlite import SqliteSaver
-from typing import Callable, List
-from langchain_core.utils import secret_from_env, convert_to_secret_str
-from langchain_core.messages import ToolMessage
 
 from langchain.agents.middleware import ModelFallbackMiddleware
-from langgraph.types import Command
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 

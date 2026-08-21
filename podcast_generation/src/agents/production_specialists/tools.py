@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import os, uuid, frontmatter
 import base64
 from pathlib import Path
-from typing import Literal, List, Tuple, Optional
+from typing import Literal, List, Optional
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 
@@ -20,8 +20,7 @@ _ffmpeg_path, _ffprobe_path = static_ffmpeg_run.get_or_fetch_platform_executable
 os.environ["PATH"] = os.path.dirname(_ffmpeg_path) + os.pathsep + os.environ.get("PATH", "")
 
 from pydub import AudioSegment
-from pydub.silence import detect_silence, split_on_silence
-from pydub.effects import normalize as pydub_normalize
+from pydub.silence import split_on_silence
 
 from .state import LLExtractorState
 

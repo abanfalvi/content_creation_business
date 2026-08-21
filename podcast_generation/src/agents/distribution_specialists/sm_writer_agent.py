@@ -10,7 +10,7 @@ import asyncio
 import opik
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
-from langchain.agents.middleware import FilesystemFileSearchMiddleware, HumanInTheLoopMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
+from langchain.agents.middleware import FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 from dotenv import load_dotenv
 
 from opik.integrations.langchain import OpikTracer, track_langgraph

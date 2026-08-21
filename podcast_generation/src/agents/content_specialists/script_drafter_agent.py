@@ -1,16 +1,12 @@
 # Write the script while iterating over the DB + using the created expert persona + host
 
 from dotenv import load_dotenv
-import sqlite3
 import opik
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langgraph.checkpoint.sqlite import SqliteSaver
-from typing import Callable, List
-from langchain_core.messages import ToolMessage
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, HumanInTheLoopMiddleware, SummarizationMiddleware, FilesystemFileSearchMiddleware, ModelFallbackMiddleware
+from langchain.agents.middleware import SummarizationMiddleware, FilesystemFileSearchMiddleware, ModelFallbackMiddleware
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 

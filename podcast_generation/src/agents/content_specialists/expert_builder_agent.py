@@ -1,19 +1,13 @@
 # Workflow: 
 # Iteratively query the database while developing an expert persona
 
-import os
 from dotenv import load_dotenv
-import sqlite3
 import opik
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langgraph.checkpoint.sqlite import SqliteSaver
-from typing import Callable, List
-from langchain_core.messages import ToolMessage
 
-from langchain.agents.middleware import wrap_model_call, ModelRequest, FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
-from langgraph.types import Command
+from langchain.agents.middleware import FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
