@@ -69,7 +69,7 @@ def run_repl() -> None:
     click_group = typer.main.get_command(app)
 
     render_banner()
-    render_wishlist()
+    # render_wishlist()
     console.print("Type [bold]/[/bold] to see available workflows, or 'exit' to quit.\n")
 
     session = PromptSession(completer=WordCompleter(WORKFLOWS, sentence=True, ignore_case=True), complete_while_typing=True)

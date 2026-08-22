@@ -9,7 +9,7 @@ from langchain_classic.retrievers.contextual_compression import (
 from langchain_core.documents import Document
 import json, frontmatter, os
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 from .state import BookSelectionState, ExpertBuilderState, ScriptDrafterState
@@ -78,6 +78,20 @@ class BookSelectionTools:
             json.dump(data, f, indent=4)
 
         return "Book list has been updated!"
+
+    @tool
+    def add_filepath(book_title: str, genre: str, filepath: str):
+        "Add filepath to the specific books"
+        with open("src/book_list.json", "r") as f:
+            data = json.load(f)
+
+        for book in data["list_of_books"]["wishlist"][genre]:
+            if book["title"] == book_title:
+                book["filepath"] = filepath
+                break
+
+        with open("src/book_list.json", "w") as f:
+            json.dump(data, f, indent=4)
 
     @tool
     def read_booklist(runtime: ToolRuntime[None, BookSelectionState]) -> Command:

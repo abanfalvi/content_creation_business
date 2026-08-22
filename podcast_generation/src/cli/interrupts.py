@@ -1,5 +1,8 @@
 import typer
 from langgraph.types import Command
+from rich.console import Console
+
+console = Console()
 
 
 def resolve_interrupts(graph, outcome: dict, config: dict) -> dict:
@@ -12,7 +15,8 @@ def resolve_interrupts(graph, outcome: dict, config: dict) -> dict:
         else:
             decision = {"approved": False, "feedback": typer.prompt("What needs to change?")}
 
-        outcome = graph.invoke(Command(resume=decision), config=config)
+        with console.status("[bold cyan]Running...[/bold cyan]", spinner="dots"):
+            outcome = graph.invoke(Command(resume=decision), config=config)
     return outcome
 
 

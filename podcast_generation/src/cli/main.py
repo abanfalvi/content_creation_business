@@ -2,10 +2,13 @@ import asyncio
 from typing import Optional
 
 import typer
+from rich.console import Console
 
 from src.cli.interrupts import resolve_interrupts
 from src.cli.state import resolve_thread_id
 from src.cli.tokens import atrack_tokens, render_usage, track_tokens
+
+console = Console()
 
 app = typer.Typer(help="CLI for the podcast production pipeline.")
 books_app = typer.Typer(help="Book discovery and ingestion.")
@@ -41,10 +44,11 @@ def books_search(
 
     tid = resolve_thread_id(key="_global", tier="book_selection", thread_id=thread_id)
     with track_tokens(book_selection_agent, tid) as usage:
-        outcome = book_selection_agent.invoke(
-            {"messages": [("user", query)]},
-            config={"configurable": {"thread_id": tid}},
-        )
+        with console.status("[bold cyan]Searching...[/bold cyan]", spinner="dots"):
+            outcome = book_selection_agent.invoke(
+                {"messages": [("user", query)]},
+                config={"configurable": {"thread_id": tid}},
+            )
     typer.echo(outcome["messages"][-1].content)
     render_usage(usage)
 
@@ -58,7 +62,8 @@ def books_preprocess(
     """Parse, chunk, and embed a book into the local vector DB."""
     from src.vector_db import preprocessing_pipeline
 
-    result = asyncio.run(preprocessing_pipeline(book_genre=book_genre, book_name=book_name, end_page=end_page))
+    with console.status("[bold cyan]Parsing, chunking, and embedding...[/bold cyan]", spinner="dots"):
+        result = asyncio.run(preprocessing_pipeline(book_genre=book_genre, book_name=book_name, end_page=end_page))
     typer.echo(result)
 
 
@@ -90,10 +95,11 @@ def content_run(
         "script_drafter": f"{tid}::script_drafter",
     }
     with track_tokens(director_agent, tid, sub_threads) as usage:
-        outcome = director_agent.invoke(
-            {"messages": [("user", query)], "active_agent": step, "book_title": book_title},
-            config=config,
-        )
+        with console.status("[bold cyan]Running...[/bold cyan]", spinner="dots"):
+            outcome = director_agent.invoke(
+                {"messages": [("user", query)], "active_agent": step, "book_title": book_title},
+                config=config,
+            )
         outcome = resolve_interrupts(director_agent, outcome, config)
     typer.echo(outcome["messages"][-1].content)
     render_usage(usage)
@@ -118,16 +124,17 @@ def production_run(
 
     sub_threads = {"audio_engineer": f"{tid}:audio_engineer"}
     with track_tokens(speech_gen_workflow, tid, sub_threads) as usage:
-        outcome = speech_gen_workflow.invoke(
-            {
-                "book_title": book_title,
-                "expert_name": expert_name,
-                "script": script_path,
-                "audio_result": "",
-                "feedback": feedback,
-            },
-            config=config,
-        )
+        with console.status("[bold cyan]Generating audio...[/bold cyan]", spinner="dots"):
+            outcome = speech_gen_workflow.invoke(
+                {
+                    "book_title": book_title,
+                    "expert_name": expert_name,
+                    "script": script_path,
+                    "audio_result": "",
+                    "feedback": feedback,
+                },
+                config=config,
+            )
         outcome = resolve_interrupts(speech_gen_workflow, outcome, config)
     typer.echo(outcome.get("lessons_learned") or outcome.get("status", "done"))
     render_usage(usage)
@@ -160,10 +167,11 @@ def distribution_run(
 
     async def _run():
         async with atrack_tokens(director_agent, tid, sub_threads) as usage:
-            outcome = await director_agent.ainvoke(
-                {"messages": [("user", query)], "active_agent": step, "script_path": path},
-                config=config,
-            )
+            with console.status("[bold cyan]Running...[/bold cyan]", spinner="dots"):
+                outcome = await director_agent.ainvoke(
+                    {"messages": [("user", query)], "active_agent": step, "script_path": path},
+                    config=config,
+                )
         return outcome, usage
 
     outcome, usage = asyncio.run(_run())
@@ -179,7 +187,8 @@ def skills_convert_traces(
     """Turn saved successful traces into reusable skill files."""
     from src.skill_converter import convert_to_skill
 
-    convert_to_skill(skill_name=namespace, book_title=book_title)
+    with console.status("[bold cyan]Converting traces into skills...[/bold cyan]", spinner="dots"):
+        convert_to_skill(skill_name=namespace, book_title=book_title)
     typer.echo("Done.")
 
 
