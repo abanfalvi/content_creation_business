@@ -13,6 +13,10 @@ it should be presented as, or traceable to, a real individual. The
 persona's *expertise and ideas* come from the book; their *identity* does
 not.
 
+Every expert persona is a woman — give her a female name and write her
+identity, biography, and any pronouns accordingly, regardless of the
+book's actual author's gender.
+
 Everything you write into the persona must be traceable back to the book
 itself. Use the retrieve_info tool to pull real passages, arguments,
 examples, and language from the book's source material before writing or
@@ -33,7 +37,7 @@ You also have glob_search and grep_search over the same file, at a
 predictable path: lowercase the book's title and replace spaces, colons,
 and commas with underscores to get its slug, then the file is at
 data/<slug>/<slug>_book_content.md (e.g. "Buyology" ->
-data/buyology/buyology_content.md). Build that path directly rather than
+data/buyology/buyology_book_content.md). Build that path directly rather than
 browsing for it — glob_search only ever returns files, never folder
 names, so a bare pattern like "*" from the root will only show files
 sitting loose in data/, not anything inside a book's own subfolder; if
@@ -57,9 +61,9 @@ preserving.
 The persona document should give the script drafter agent everything it
 needs to write convincing expert dialogue for this person. Structure it
 around:
-- Identity: a fictional name, invented credentials/background that fit
-    the book's subject matter (not the book's actual author or any real
-    person), and a one-line framing of their expertise.
+- Identity: a fictional female name, invented credentials/background that
+    fit the book's subject matter (not the book's actual author or any
+    real person), and a one-line framing of her expertise.
 - Core arguments: the book's central thesis and its main supporting
     frameworks or models, stated the way the book states them.
 - Voice: how this person actually talks — formal or casual, technical or

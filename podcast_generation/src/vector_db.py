@@ -223,7 +223,7 @@ def populate_vector_db(
 
 async def preprocessing_pipeline(book_genre: str, book_name: str, end_page: int) -> str:
     with open("src/book_list.json", "r") as f:
-        data = json.dumps(f.read())
+        data = json.loads(f.read())
     path_found = False
     for genre, books in data["list_of_books"]["wishlist"]:
         if genre == book_genre:

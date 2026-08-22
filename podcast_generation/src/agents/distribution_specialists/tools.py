@@ -8,14 +8,12 @@ from typing import Literal
 from dropbox.exceptions import ApiError
 
 from langchain.tools import tool, ToolRuntime
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
-
-from huggingface_hub import HfApi
+from .state import SMWriterState
 
 load_dotenv()
-
-hf_token = HfApi()
-hf_token.create_repo(repo_id="abanfalvi/podcast-social-assets", repo_type="dataset", exist_ok=True)
 
 _spotify_token_cache = {"access_token": None, "expires_at": 0}
 
@@ -74,8 +72,7 @@ class SMWriterAgentTools:
                     raise
 
             direct_url = url.replace("?dl=0", "?raw=1")
-            # resolve/main redirects (302) to a signed CDN URL — Canva's fetcher
-            # checks for a 200 and won't follow redirects, so resolve it here.
+
             # public_url = requests.head(hf_url, allow_redirects=True, timeout=15).url
 
         upload_asset = next(t for t in runtime.tools if t.name == "upload-asset-from-url")
@@ -96,7 +93,7 @@ class SMWriterAgentTools:
         return runtime.state.get("script")
 
     @tool
-    async def export_and_download_design(design_id: str, format: dict, output_path: str, runtime: ToolRuntime) -> str:
+    async def export_and_download_design(design_id: str, format: dict, output_path: str, runtime: ToolRuntime[None, SMWriterState]) -> str:
         "Exports a Canva design and saves it locally in one step — no need to call export-design yourself or handle its temporary download URL. Call get-export-formats first to confirm a format this design actually supports."
         export_design = next(t for t in runtime.tools if t.name == "export-design")
         result = await export_design.ainvoke({
@@ -115,16 +112,36 @@ class SMWriterAgentTools:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "wb") as f:
             f.write(response.content)
-        return output_path
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"Design is successfully saved to {full_path}",
+                        tool_call_id=runtime.tool_call_id,
+                    )
+                ],
+                "image_post_path": full_path,
+            }
+        )
 
     @tool
-    def save_post_text(output_path: str, text: str):
+    def save_post_text(output_path: str, text: str, runtime: ToolRuntime[None, SMWriterState]):
         "Save the text content of the post. Use md format"
         full_path = f"data/{output_path}"
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(text)
-        return "Post text successfully saved!"
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content="Post text successfully saved!",
+                        tool_call_id=runtime.tool_call_id,
+                    )
+                ],
+                "caption_path": full_path,
+            }
+        )
 
     @tool
     def create_folder(folder_path: str, folder_name: str):

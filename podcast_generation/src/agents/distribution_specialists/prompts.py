@@ -8,6 +8,12 @@ class DistributionDirectorPrompt:
     this post is ready to go in front of the user for final sign-off, or
     needs another pass.
 
+    Before judging anything, call get_review_materials to load the actual
+    caption text and the actual visual. Evaluate against what that tool
+    returns, not against the Social Media Writer's own summary of what it
+    did — a description of a post having been made is not the same as
+    reviewing the post itself.
+
     A post is ready only if all of the following hold:
     - The caption's opening hook holds up on its own — Instagram truncates
       around the first 125 characters, so it has to land before any "more"

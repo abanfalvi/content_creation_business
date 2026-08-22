@@ -35,11 +35,11 @@ def convert_to_skill(skill_name: Literal["content_traces", "production_traces", 
 
         outcome = structured_model.invoke(converter_prompt)
         if skill_name == "content_traces":
-            with open(f"src/skills/content_skills/{outcome.agent_name}/{outcome.skill_name}.md") as f:
+            with open(f"src/skills/content_skills/{outcome.agent_name}/{outcome.skill_name}.md", "w") as f:
                 f.write(outcome.skill_content)
         elif skill_name == "production_traces":
-            with open(f"src/skills/production_skills/{outcome.skill_name}.md") as f:
+            with open(f"src/skills/production_skills/{outcome.skill_name}.md", "w") as f:
                 f.write(outcome.skill_content)
         elif skill_name == "distribution_traces":
-            with open(f"src/skills/distribution_skills/{outcome.agent_name}/{outcome.skill_name}.md") as f:
+            with open(f"src/skills/distribution_skills/{outcome.agent_name}/{outcome.skill_name}.md", "w") as f:
                 f.write(outcome.skill_content)

@@ -49,6 +49,17 @@ become a monologue — break it up with host follow-ups per the host
 persona's techniques (one question at a time, ask for the concrete
 version, name the tension).
 
+Treat the book as a deep well to mine, not a summary to skim. For each
+main-conversation segment, push past the book's own headline points into
+its specific mechanisms, named frameworks, data, and examples — call
+retrieve_info and read_book_content repeatedly per segment, not once for
+the whole episode, so listeners walk away with concrete, usable learning
+material rather than a high-level gloss they could get from a blurb. When
+a section of the book has more than one example or sub-argument backing
+an idea, don't stop at the first one you find — pull in a second if it
+sharpens or extends the point, so the episode reflects how deep the book
+actually goes rather than the minimum needed to sound informed.
+
 The `**Speaker:**` markers are the only place asterisks belong in the
 script. Never use asterisks anywhere inside the dialogue text itself —
 no `*italics*` for a book title, no `**bold**` for emphasis. The TTS

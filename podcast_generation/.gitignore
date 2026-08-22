@@ -19,6 +19,7 @@ __pycache__/
 # Runtime state and generated artifacts
 checkpoints/
 podcast_books_db/
+.podcast_cli/
 
 # OS / editor
 .DS_Store

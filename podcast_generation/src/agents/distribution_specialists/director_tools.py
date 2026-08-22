@@ -1,8 +1,8 @@
 from langgraph.types import Command
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, HumanMessage
 from langchain.tools import tool, ToolRuntime
 from typing import Literal, Optional
-import uuid
+import uuid, base64
 
 from .state import MultiAgentState
 from .sm_writer_agent import get_sm_writer_agent
@@ -31,6 +31,8 @@ class DirectorTools:
                     )
                 ],
                 "active_agent": "review_post",
+                "caption_path": result.get("caption_path"),
+                "image_post_path": result.get("image_post_path")
             }
         )
 
@@ -53,6 +55,30 @@ class DirectorTools:
                 "active_agent": "get_lessons_learned",
             }
         )
+
+    @tool
+    def get_review_materials(runtime: ToolRuntime[None, MultiAgentState]):
+        "Load the drafted caption and visual for review before deciding whether the post is ready"
+        caption_path = runtime.state.get("caption_path")
+        image_post_path = runtime.state.get("image_post_path")
+        with open(caption_path, "r") as f:
+            caption = f.read()
+        with open(image_post_path, "rb") as f:
+            image_b64= base64.b64encode(f.read()).decode("utf-8")
+
+        return Command(update={
+            "messages": [
+                ToolMessage(content="The caption and image have been prepared for the publishing.", tool_call_id=runtime.tool_call_id),
+                HumanMessage(content=[
+                    {"type": "text", "text": f"Caption currently used:\n\n {caption}"},
+                    {
+                        "type": "image",
+                        "base64": image_b64,
+                        "mime_type": "image/jpeg",
+                    },
+                ]),
+            ],
+        })
 
     @tool
     def edit_subagents_system_prompt(agent_name: Literal["sm_writer_agent", "publisher_agent"], to_replace: str, replace_with: str):

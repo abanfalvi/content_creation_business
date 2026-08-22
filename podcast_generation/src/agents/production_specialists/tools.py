@@ -85,9 +85,7 @@ class AudioEngineerTools:
 
         return Command(update={
             "messages": [
-                # tool-role messages can only carry plain text on this API — the
-                # audio itself has to travel in a separate user-role message
-                # right after, which is the only role that accepts audio content.
+
                 ToolMessage(content="Audio loaded — see the attached clip below.", tool_call_id=runtime.tool_call_id),
                 HumanMessage(content=[
                     {"type": "text", "text": f"The current podcast clip ({input_path}) is the following:"},

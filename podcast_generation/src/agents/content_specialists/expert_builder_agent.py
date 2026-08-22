@@ -26,32 +26,12 @@ with open("src/agents/content_specialists/prompts/expert_builder_agent_prompt.md
 expert_builder_model = ChatOpenRouter(
     model=EXPERT_BUILDER_MODEL,
     temperature=0.2,
-    # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
-    # api_key=OPENROUTER_API_KEY
 )
 
 compressor_model = ChatOpenRouter(
     model=COMPRESSOR_MODEL,
     temperature=0.2,
 )
-
-STEP_CONFIG = {
-    "retrieve_content": {
-        "prompt": "",
-        "tools": [],
-        "requires": [],
-    },
-    "read_persona": {
-        "prompt": "",
-        "tools": [],
-        "requires": [],
-    },
-    "edit_persona": {
-        "prompt": "",
-        "tools": [],
-        "requires": [], 
-    },
-}
 
 
 # Collect all tools from all step configurations
@@ -62,7 +42,7 @@ all_tools = [
     ExpertProfileTools.append_persona,
     ExpertProfileTools.read_book_content,
     ExpertProfileTools.load_skill_content,
-    ExpertProfileTools.load_available_skills
+    ExpertProfileTools.load_available_skills,
 ]
 
 expert_builder_agent = create_agent(

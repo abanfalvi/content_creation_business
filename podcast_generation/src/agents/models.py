@@ -15,7 +15,7 @@ AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5" # google/gemini-2.5-flash-lite
 # Distribution specialists
 SM_WRITER_MODEL = "qwen/qwen3.7-flash"
 PUBLISHER_MODEL = "nvidia/nemotron-3.5-lightning"
-DISTRIBUTION_DIRECTOR_MODEL = "deepseek/deepseek-v4-flash"
+DISTRIBUTION_DIRECTOR_MODEL = "dots-studio/dots-3-note-preview:free"
 
 # Compressor Model
 COMPRESSOR_MODEL = "inclusionai/ling-3.0-flash"

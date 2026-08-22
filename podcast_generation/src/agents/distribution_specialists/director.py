@@ -51,8 +51,8 @@ STEP_CONFIG = {
     },
     "review_post": {
         "prompt": DistributionDirectorPrompt.REVIEW_POST,
-        "tools": [DirectorTools.call_sm_writer_agent, DirectorTools.call_publisher_agent],
-        "requires": [],
+        "tools": [DirectorTools.call_sm_writer_agent, DirectorTools.call_publisher_agent, DirectorTools.get_review_materials],
+        "requires": ["caption_path", "image_post_path"],
     },
     "get_lessons_learned": {
         "prompt": "",
@@ -180,7 +180,8 @@ all_tools = [
     DirectorTools.read_subagents_system_prompt,
     DirectorTools.edit_subagents_system_prompt,
     DirectorTools.save_learnable_traces,
-    DirectorTools.update_specialist_skills
+    DirectorTools.update_specialist_skills,
+    DirectorTools.get_review_materials
 ]
 
 director_agent = create_agent(
