@@ -49,7 +49,7 @@ async def build_sm_writer_agent():
                 root_path="data",
                 use_ripgrep=True,
             ),
-            SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 8)),
+            SummarizationMiddleware(model=compressor_model, trigger=("tokens", 30000), keep=("messages", 8)),
             ModelFallbackMiddleware(
                 ChatOpenRouter(model="upstage/solar-pro4", temperature=.2),
                 ChatOpenRouter(model="deepseek/deepseek-v4-flash", temperature=.2)

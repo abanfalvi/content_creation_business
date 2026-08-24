@@ -1,6 +1,3 @@
-# Workflow: 
-# Iteratively query the database while developing an expert persona
-
 from dotenv import load_dotenv
 import opik
 
@@ -55,7 +52,7 @@ expert_builder_agent = create_agent(
             root_path="data",
             use_ripgrep=True,
         ),
-        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 5)),
+        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 30000), keep=("messages", 5)),
         ModelFallbackMiddleware(
             ChatOpenRouter(model="upstage/solar-pro4", temperature=0.2),
             ChatOpenRouter(model="deepseek/deepseek-v4-flash", temperature=0.2)

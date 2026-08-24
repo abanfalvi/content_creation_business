@@ -4,7 +4,7 @@ from typing import Callable
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import FilesystemFileSearchMiddleware
+from langchain.agents.middleware import FilesystemFileSearchMiddleware, ModelFallbackMiddleware
 
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 
@@ -104,6 +104,10 @@ audio_engineer = create_agent(
             root_path="data",
             use_ripgrep=True,
         ),
+        ModelFallbackMiddleware(
+            ChatOpenRouter(model="google/gemini-2.5-flash-lite", temperature=0.2),
+            ChatOpenRouter(model="thinkingmachines/inkling-small", temperature=0.2)
+        )
     ],
     checkpointer=checkpointer,
     # response_format=RubricScores

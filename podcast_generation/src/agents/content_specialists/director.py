@@ -170,14 +170,21 @@ def apply_step_config(
         step_prompt = f"""
             Analyse the following traces by collecting the steps that were successully
             taken to solve the next part of the question AND should serve as a reinforcing
-            example of how this question/issue should be solved. 
+            example of how this question/issue should be solved.
             In addition, make sure to collect those steps where the agent had troubles/failed
             to successfully, or smoothly, solve the part of the question/issue at hand AND should
-            serve as a learning trace of what should be avoided in the future. 
+            serve as a learning trace of what should be avoided in the future.
+
+            When you call save_learnable_traces, write every trace as a universal
+            lesson that generalizes to producing an episode from ANY book, not
+            just the one processed in this run. Strip out the specific book
+            title, author, character names, or any other content unique to
+            this run, and keep only the transferable pattern in how the agent
+            reasoned, chose tools, or handled the situation.
 
             Traces collected for this run: {traces}
-            
         """
+
     else:
         step_prompt = stage_config["prompt"].format(
             **request.state

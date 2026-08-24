@@ -24,4 +24,4 @@ COMPRESSOR_MODEL = "inclusionai/ling-3.0-flash"
 LL_EXTRACTOR_AGENT = "deepseek/deepseek-v4-flash"
 
 # Successful traces to skill converter model
-SKILL_CONVERTER_MODEL = "qwen/qwen3.7-flash"
+SKILL_CONVERTER_MODEL = "cohere/north-mini-code:free"

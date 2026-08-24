@@ -1,5 +1,3 @@
-# Write the script while iterating over the DB + using the created expert persona + host
-
 from dotenv import load_dotenv
 import opik
 
@@ -25,33 +23,12 @@ with open("src/agents/content_specialists/prompts/script_drafter_agent_prompt.md
 script_drafter_model = ChatOpenRouter(
     model=SCRIPT_DRAFTER_MODEL,
     temperature=0.3,
-    # api_key=secret_from_env("OPENROUTER_API_KEY", default=None)
-    # api_key=OPENROUTER_API_KEY
 )
 
 compressor_model = ChatOpenRouter(
     model=COMPRESSOR_MODEL,
     temperature=0.2,
 )
-
-# Step configuration: maps step name to (prompt, tools, required_state)
-STEP_CONFIG = {
-    "edit_script": {
-        "prompt": "",
-        "tools": [],
-        "requires": [],
-    },
-    "read_personas": {
-        "prompt": "",
-        "tools": [],
-        "requires": [],
-    },
-    "retrieve_content": {
-        "prompt": "",
-        "tools": [],
-        "requires": [], # these go into the prompt
-    },
-}
 
 
 # Collect all tools from all step configurations
@@ -76,7 +53,7 @@ script_drafter_agent = create_agent(
             root_path="data",
             use_ripgrep=True,
         ),
-        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 20000), keep=("messages", 5)),
+        SummarizationMiddleware(model=compressor_model, trigger=("tokens", 30000), keep=("messages", 5)),
         ModelFallbackMiddleware(
             ChatOpenRouter(model="upstage/solar-pro4", temperature=0.3),
             ChatOpenRouter(model="deepseek/deepseek-v4-flash", temperature=0.3)

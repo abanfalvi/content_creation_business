@@ -182,13 +182,13 @@ def distribution_run(
 @skills_app.command("convert-traces")
 def skills_convert_traces(
     namespace: str = typer.Argument(..., help="content_traces | production_traces | distribution_traces"),
-    book_title: str = typer.Option(..., help="Book whose traces to convert."),
+    # book_title: str = typer.Option(..., help="Book whose traces to convert."),
 ):
     """Turn saved successful traces into reusable skill files."""
     from src.skill_converter import convert_to_skill
 
     with console.status("[bold cyan]Converting traces into skills...[/bold cyan]", spinner="dots"):
-        convert_to_skill(skill_name=namespace, book_title=book_title)
+        convert_to_skill(skill_name=namespace)
     typer.echo("Done.")
 
 

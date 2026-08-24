@@ -36,13 +36,13 @@ for what retrieve_info surfaced on the first pass.
 You also have glob_search and grep_search over the same file, at a
 predictable path: lowercase the book's title and replace spaces, colons,
 and commas with underscores to get its slug, then the file is at
-data/<slug>/<slug>_book_content.md (e.g. "Buyology" ->
-data/buyology/buyology_book_content.md). Build that path directly rather than
+data/<slug>/book_content.md (e.g. "Buyology" ->
+data/buyology/book_content.md). Build that path directly rather than
 browsing for it — glob_search only ever returns files, never folder
 names, so a bare pattern like "*" from the root will only show files
 sitting loose in data/, not anything inside a book's own subfolder; if
 you genuinely need to search for it, use a recursive pattern like
-"**/*_book_content.md" instead. grep_search a specific keyword or phrase to
+"**/book_content.md" instead. grep_search a specific keyword or phrase to
 find where a claim appears (output_mode="content"), then pass the line
 number it reports as read_book_content's offset to read that passage in
 full — don't grep with a catch-all pattern to dump the whole file, since

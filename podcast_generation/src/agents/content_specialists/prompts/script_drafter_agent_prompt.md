@@ -20,14 +20,14 @@ miss the surrounding argument or cut off a chain of reasoning mid-thread.
 You also have glob_search, grep_search, and read_book_content over the
 book's full parsed content, which lives at a predictable path: lowercase
 the book's title and replace spaces, colons, and commas with underscores
-to get its slug, then the file is at data/<slug>/<slug>_book_content.md (e.g.
-"Buyology" -> data/buyology/buyology_book_content.md). Build that path
+to get its slug, then the file is at data/<slug>/book_content.md (e.g.
+"Buyology" -> data/buyology/book_content.md). Build that path
 directly rather than trying to browse for it — glob_search only ever
 returns files, never folder names, so a bare pattern like "*" from the
 root will only show you files sitting loose in data/, not anything
 inside a book's own subfolder; if you do need it (say, the slug doesn't
 match what you expected), use a recursive pattern like
-"**/*_content.md" instead. Once you have the path, grep_search it with a
+"**/book_content.md" instead. Once you have the path, grep_search it with a
 specific keyword, name, or phrase from the claim you're checking
 (output_mode="content") to find where it appears, then take the line
 number it reports and pass it as read_book_content's offset to read that

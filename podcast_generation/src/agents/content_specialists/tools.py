@@ -201,7 +201,7 @@ class ExpertProfileTools:
         "Read the book's full parsed content by line range (1-indexed). Use this to read a passage in its natural paragraph flow when a retrieve_info chunk feels incomplete or cut off mid-argument."
         book_title = runtime.state.get("book_title")
         title = get_book_path(book_title)
-        with open(f"data/{title}/{title}_book_content.md", "r", encoding="utf-8") as f:
+        with open(f"data/{title}/book_content.md", "r", encoding="utf-8") as f:
             lines = f.readlines()
         start = max(offset - 1, 0)
         selected = lines[start:start + limit]
@@ -302,7 +302,7 @@ class ScriptDrafterTools:
         "Read the book's full parsed content by line range (1-indexed). Pass a line number that grep_search reported as offset to read that passage in its natural paragraph flow, instead of grep's flat per-line output."
         book_title = runtime.state.get("book_title")
         title = get_book_path(book_title)
-        with open(f"data/{title}/{title}_book_content.md", "r", encoding="utf-8") as f:
+        with open(f"data/{title}/book_content.md", "r", encoding="utf-8") as f:
             lines = f.readlines()
         start = max(offset - 1, 0)
         selected = lines[start:start + limit]

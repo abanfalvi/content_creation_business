@@ -22,6 +22,7 @@ from .audio_engineer_agent import audio_engineer_agent
 from ...memory.memory_store import shared_store
 from ..models import LL_EXTRACTOR_AGENT
 from .utils import checkpointer
+from ..content_specialists.utils import get_book_path
 
 from langgraph.graph import StateGraph, START, END
 
@@ -76,11 +77,11 @@ def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, unde
 
 
 def generate_podcast_audio_node(state: VoiceWorkflowState) -> dict:
-    os.makedirs(f"data/{state['book_title']}/audio_contents", exist_ok=True)
+    os.makedirs(f"data/{get_book_path(state['book_title'])}/audio_contents", exist_ok=True)
     path = build_episode(
         state["script"], 
         voice_map={"Jordan": "536d3a5e000945adb7038665781a4aca", state['expert_name']: "933563129e564b19a115bedd57b7406a"},
-        output_path=f"data/{state['book_title']}/audio_contents/podcast_audio.mp3"
+        output_path=f"data/{get_book_path(state['book_title'])}/audio_contents/podcast_audio.mp3"
         )
     return {"audio_result": path}
 

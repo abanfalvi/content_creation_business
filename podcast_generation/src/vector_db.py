@@ -131,7 +131,7 @@ async def create_chunk_surrounding_summaries(chunks: List[Document]) -> List[Doc
     for idx, chunk in tqdm(enumerate(chunks)):
         prev = chunks[idx-1] if idx != 0 else ""
         next = chunks[idx+1] if idx != len(chunks) - 1 else "" 
-        model = ChatOpenRouter(model="upstage/solar-pro4", temperature=0.1, max_tokens=1024)
+        model = ChatOpenRouter(model="inclusionai/ling-3.0-flash", temperature=0.1, max_tokens=1024)
         prompt = f"Summarise these sections from a book that surrounds the current chunk, so the agent will have enough information in which context it is located. Return only the summary! \n\n Previous section: {prev}\n Following section: {next}"
         summary = await model.ainvoke([("user", prompt)])
         chunks[idx].metadata['context_summary'] = summary.content
@@ -225,7 +225,7 @@ async def preprocessing_pipeline(book_genre: str, book_name: str, end_page: int)
     with open("src/book_list.json", "r") as f:
         data = json.loads(f.read())
     path_found = False
-    for genre, books in data["list_of_books"]["wishlist"]:
+    for genre, books in data["list_of_books"]["wishlist"].items():
         if genre == book_genre:
             for book in books:
                 if book["title"] == book_name:
@@ -240,22 +240,23 @@ async def preprocessing_pipeline(book_genre: str, book_name: str, end_page: int)
         if path_found:
             break
     book_name = get_book_path(book_name)
+    os.makedirs(f"data/{book_name}", exist_ok=True)
     if end_page < 200:
         page_ranges = f"1-{str(end_page)}"
-        save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md")
+        save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/book_content.md")
     else:
         n = math.ceil(end_page / 200)
         for run in range(n):
             if run == 0:
                 page_ranges = f"1-200"
-                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md")
+                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/book_content.md")
             else:
                 start_page = str(200*run + 1)
                 last_page = str(min(200*(run+1), end_page))
                 page_ranges = f"{start_page}-{last_page}"
-                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/{book_name}_content.md", append=True)
+                save_markdown(zip_url=parse_pdf(filepath, book_name, page_ranges), output_path=f"data/{book_name}/book_content.md", append=True)
 
-    book_chunks = await chunk_document(md_path=f"data/{book_name}/{book_name}_book_content.md", book_title=book_title, author=book_author)
+    book_chunks = await chunk_document(md_path=f"data/{book_name}/book_content.md", book_title=book_title, author=book_author)
     populate_vector_db(book_chunks)
     return f"{book_name} as been preprocessed successfully!"
 

@@ -151,15 +151,20 @@ class DirectorTools:
         """
         Store both positive and undesired exemplary traces that can be used for improving the specialist agents
 
+        Traces must be universal: write them as generalizable lessons about the
+        agent's workflow, reasoning, or tool usage that would apply to producing
+        an episode from ANY book. Never name the specific book, its author,
+        title, characters, or any content particular to the one run being
+        analyzed — strip that out and keep only the transferable pattern.
+
         Args:
         agent_name: str = which specialist agent this trace is about (the run may involve several; tag each trace with the one it actually applies to)
-        book_title: str = name of the book that is being processed
         success_trace: bool = whether the current input is to reinforce a behaviour (True) or serve as a negative example (False)
-        title: str = a concise summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
-        description: str = one-sentence overview of the item's purpose
-        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences (Use this for desired steps that should be reinforced)
-        avoid: str = description of what should be avoided and when (Use this only when you want to add undesired trace)
-        prefer: str = description of what should be done instead of the behaviour that should be avoided (Use this only when you want to add undesired trace)
+        title: str = a concise, book-agnostic summary of the core strategy (e.g., "Navigating Multi-Step Search Filters")
+        description: str = one-sentence, book-agnostic overview of the item's purpose
+        content: str = detailed reasoning steps, decision rationales, and operational insights extracted from past experiences, generalized so they apply regardless of which book is being processed (Use this for desired steps that should be reinforced)
+        avoid: str = book-agnostic description of what should be avoided and when (Use this only when you want to add undesired trace)
+        prefer: str = book-agnostic description of what should be done instead of the behaviour that should be avoided (Use this only when you want to add undesired trace)
 
         Output:
         Confirmation that your input has been saved to the persistent local store.

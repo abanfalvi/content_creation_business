@@ -31,3 +31,8 @@ def resolve_thread_id(key: str, tier: str, thread_id: str | None) -> str:
     state["threads"][slot] = thread_id
     _save(state)
     return thread_id
+
+
+def all_threads() -> dict[str, str]:
+    """Every known slot -> thread_id, for display (e.g. the REPL's /status)."""
+    return dict(_load()["threads"])
