@@ -30,3 +30,5 @@ Thumbs.db
 *mcp_tokens.*
 data/
 tmp/
+interface.ipynb
+src/book_list.json
