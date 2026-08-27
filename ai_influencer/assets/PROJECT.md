@@ -1,6 +1,12 @@
+# TODO
+- Develop Persona & Identity tier + auditor
+- Develop Content Production tier + auditor
+- Develop Engagement & Community tier + auditor
+- Implement self-evolution
+
 # Under development
 
-**Summary:** Manages one or several AI-generated influencer personas across Instagram, TikTok, and X. The agency owns everything about the persona — face, body, personality, backstory, and voice — and keeps it visually consistent across every photo and video using a locked character model. It runs the full content operation: daily posts, DM and comment engagement, follower growth, and a monetization layer through brand partnerships, affiliate content, and paid subscription tiers. Like the webcomic agency, this is an **IP-building** play rather than a pure content pipeline — the persona itself is the asset, and it compounds in value as the following grows.
+**Summary:** Manages one or several AI-generated influencer personas across Instagram, TikTok, and X. The agency owns everything about the persona — face, body, personality, backstory, and voice — and keeps it visually consistent across every photo and video using a locked character model. It runs the full content operation: daily posts, DM and comment engagement, follower growth, and a monetization layer through brand partnerships, affiliate content, and paid subscription tiers.
 
 ---
 
@@ -13,21 +19,20 @@
 
 🎭 **Persona & Identity Director**
 - Character Design Agent (face/body reference, visual identity)
-- Visual Style Lock Agent (LoRA training for cross-image/video consistency)
+- Visual Style Lock Agent (LoRA training for cross-image/video consistency) -> only a tool call (generates initial pictures of the designed character)
 - Personality & Voice Agent (tone, speech patterns, values)
 - Backstory & Lore Agent (life narrative, interests, relationships)
 
+Workflow: design the character -> generate the images -> LLM judge -> if OK, write personality + backstory in parallel; if not, go back to character design -> human review
+
 🎬 **Content Production Director**
-- Photo Generation Agent
-- Video Generation Agent (RunwayML / Kling / similar)
-- Caption & Hook Writer Agent
+- SM Content Writer Agent: Caption & Hook Writer + Photo & Video Generation
 - Content Calendar Agent
 
 💬 **Engagement & Community Director**
-- DM Response Agent
-- Comment Reply Agent
+- DM Response & Comment Reply Agent
 - Follower Growth Agent
-- Sentiment & Community Health Monitor
+(- Sentiment & Community Health Monitor)
 
 💸 **Monetization & Partnerships Director** (Comes later!)
 - Brand Deal Outreach Agent
@@ -104,18 +109,18 @@
 Set max turn budget, if it is reached change the agent's tools to one: summarise its actions and perceived outcomes as a report -> forwarded to the next stage
 
 ## Architecture Layer
-**Task management:**	Convert the user goal into requirements, dependencies, and subtasks	-> Manager, planner, dependency graph, task board
-**Agent organization:**	Define which specialized workers exist ->	Researcher, executor, coder, critic, auditor, integrator
-**Orchestration:**	Decide when and how agents run ->	Sequential/parallel execution, retries, escalation, stopping
-**Communication:** Control what agents send to one another ->	Typed messages, handoff schemas, summaries, routing
-**Memory and state:**	Preserve useful information across contexts and tasks	-> Task state, episodic memory, semantic memory, skills, experience database
-**Tool and environment layer:**	Let agents act safely and consistently -> Tool registry, dispatch, wrappers, sandbox, permissions, checkpoints
-**Verification:**	Determine whether progress is real ->	Unit tests, artifact checks, independent auditors, consistency validation
-**Recovery:**	Recover from failed or misleading execution -> Rollback, loop breakers, repair agents, alternative plans
-**Harness evolution:**	Modify the current agent system -> Failure mining, patch generation, patch application, regression gates
-**Search and selection:**	Control exploration of possible designs	-> Candidate budgets, branch selection, novelty, pruning
-**Meta-improvement:**	Improve the process that improves the harness	-> Evolving diagnosis, retrieval, allocation, proposal, and edit policies
-**Deployment adaptation:**	Adapt to changing task distributions ->	Task routing, specialized branches, drift detection, human escalation
+**Task management:**	Convert the user goal into requirements, dependencies, and subtasks	-> Manager, planner, dependency graph, task board -> *LEVEL*: Manager
+**Agent organization:**	Define which specialized workers exist ->	Researcher, executor, coder, critic, auditor, integrator -> *LEVEL*: Specialist
+**Orchestration:**	Decide when and how agents run ->	Sequential/parallel execution, retries, escalation, stopping -> *LEVEL*: Manager
+**Communication:** Control what agents send to one another ->	Typed messages, handoff schemas, summaries, routing -> *LEVEL*: Manager
+**Memory and state:**	Preserve useful information across contexts and tasks	-> Task state, episodic memory, semantic memory, skills, experience database -> *LEVEL*: Specialist
+**Tool and environment layer:**	Let agents act safely and consistently -> Tool registry, dispatch, wrappers, sandbox, permissions, checkpoints -> *LEVEL*: Specialist
+**Verification:**	Determine whether progress is real ->	Unit tests, artifact checks, independent auditors, consistency validation -> *LEVEL*: Specialist + Auditor (at the end)
+**Recovery:**	Recover from failed or misleading execution -> Rollback, loop breakers, repair agents, alternative plans -> *LEVEL*: Specialist
+**Harness evolution:**	Modify the current agent system -> Failure mining, patch generation, patch application, regression gates -> *LEVEL*: Manager
+**Search and selection:**	Control exploration of possible designs	-> Candidate budgets, branch selection, novelty, pruning -> *LEVEL*: Specialist
+**Meta-improvement:**	Improve the process that improves the harness	-> Evolving diagnosis, retrieval, allocation, proposal, and edit policies -> *LEVEL*: Meta agent
+**Deployment adaptation:**	Adapt to changing task distributions ->	Task routing, specialized branches, drift detection, human escalation -> *LEVEL*: Every
 
 ## Evolution of the System
 1. Analyst Agent: This agent reviews past trajectories and feedback to identify failure patterns. It maintains a "task board" that prioritizes which gaps need to be filled.
