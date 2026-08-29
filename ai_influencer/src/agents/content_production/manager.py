@@ -1,10 +1,11 @@
 # Content Production Manager Agent
 # Aim: Coordinate the work in the department
 from dotenv import load_dotenv
-from typing import Tuple
+from typing import Tuple, List
 import opik, asyncio, json
 from datetime import date
 from opik.integrations.langchain import OpikTracer, track_langgraph
+from pydantic import BaseModel, Field
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
@@ -29,24 +30,31 @@ class ManagerState(AgentState):
     video_url: NotRequired[str]
     lipsynced: NotRequired[str]
 
+class HandOffContract(BaseModel):
+    subtask_id: str = Field(description="Short unique identifier for this subtask, e.g. 'calendar-2026w35-tue'.")
+    objective: str = Field(description="The single concrete goal the specialist must accomplish.")
+    acceptance_criteria: List[str] = Field(description="Concrete, checkable conditions that must all be true for the output to be accepted.")
+    constraints: List[str] = Field(description="Hard limits the specialist must respect (e.g. platform, tone, length, brand rules).")
+    expected_outputs: List[str] = Field(description="The specific artifacts the specialist should produce (e.g. 'one Instagram caption', 'one 9:16 image').")
+
 class ManagerTools:
 
     @tool
-    def call_content_strategist_agent(prompt: str, runtime: ToolRuntime[None, ManagerState]) -> str:
+    def call_content_strategist_agent(prompt: HandOffContract, runtime: ToolRuntime[None, ManagerState]) -> str:
         "Delegate to the Content Strategist Agent to plan, review, or update the influencer's content calendar (CALENDAR.json). `prompt` must state the concrete planning task (e.g. the window to plan, or the entry to revise), not a generic instruction."
         thread_id = runtime.config["configurable"]["thread_id"]
         result = content_strategist_agent.invoke(
-            {"messages": prompt, "influencer_name": runtime.state.get("influencer_name")},
+            {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name")},
             config={"configurable": {"thread_id": f"{thread_id}:content_strategist_agent"}},
         )
         return result["messages"][-1].content
 
     @tool
-    def call_sm_content_writer_agent(prompt: str, runtime: ToolRuntime[None, ManagerState]) -> Command:
+    def call_sm_content_writer_agent(prompt: HandOffContract, runtime: ToolRuntime[None, ManagerState]) -> Command:
         "Delegate to the Social Media Content Writer Agent to produce one piece of content (image/video + caption). `prompt` must name the specific calendar entry or idea to execute, not a generic instruction."
         thread_id = runtime.config["configurable"]["thread_id"]
         result = sm_content_writer_agent.invoke(
-            {"messages": prompt, "influencer_name": runtime.state.get("influencer_name"), "voice_name": runtime.state.get("voice_name")},
+            {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name"), "voice_name": runtime.state.get("voice_name")},
             config={"configurable": {"thread_id": f"{thread_id}:sm_content_writer_agent"}},
         )
         return Command(
