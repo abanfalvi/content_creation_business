@@ -30,6 +30,9 @@ class AgentTools:
         with open(f"{influencer_folder}/BACKSTORY.md", "w") as f:
             f.write("")
 
+        with open(f"{influencer_folder}/CALENDAR.json", "w") as f:
+            json.dump({}, f)
+
         return Command(
             update={
                 "messages": [

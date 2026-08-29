@@ -31,7 +31,7 @@ Workflow: design the character -> generate the images -> LLM judge -> if OK, wri
 
 💬 **Engagement & Community Director**
 - DM Response & Comment Reply Agent
-- Follower Growth Agent
+- Follower Growth & Community Health Agent
 (- Sentiment & Community Health Monitor)
 
 💸 **Monetization & Partnerships Director** (Comes later!)
