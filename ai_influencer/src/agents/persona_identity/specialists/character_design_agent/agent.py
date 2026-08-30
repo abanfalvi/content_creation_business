@@ -10,7 +10,7 @@ from langchain.agents import create_agent
 
 from langchain.agents.middleware import ModelFallbackMiddleware
 
-from ....models import CHARACTER_DESIGN_AGENT
+from .....models import CHARACTER_DESIGN_AGENT
 from .tools import AgentTools
 from .state import CharacterState
 from ...utils import checkpointer

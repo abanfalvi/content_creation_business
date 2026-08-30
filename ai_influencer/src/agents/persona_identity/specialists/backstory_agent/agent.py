@@ -11,7 +11,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain.agents.middleware.types import ModelRequest
 
-from ....models import BACKSTORY_AGENT
+from .....models import BACKSTORY_AGENT
 from .tools import AgentTools
 from .state import BackstoryState
 from ...utils import checkpointer

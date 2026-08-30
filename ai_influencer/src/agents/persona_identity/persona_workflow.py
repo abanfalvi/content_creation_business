@@ -21,7 +21,9 @@ from .specialists.character_design_agent.agent import character_design_agent
 from .specialists.personality_agent.agent import personality_agent
 from .utils import checkpointer
 from .workflow_state import PersonaWorkflowState
-from ..models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL
+from ...models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL
+from ...auditor.tools import AgentTools
+from ...auditor.agent import auditor_agent
 
 from langgraph.graph import StateGraph, START, END
 
@@ -56,7 +58,7 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
             },
             config={"configurable": {"thread_id": thread_id}},
         )
-        return personality_result["messages"][-1].content
+        return personality_result["messages"][-1].content, personality_result.get("voice_name")
     elif agent == "character_design_agent":
         character_result = character_design_agent.invoke(
             {
@@ -108,10 +110,10 @@ def call_personality_agent_node(state: PersonaWorkflowState, *, config: Runnable
     thread_id = f"{config['configurable']['thread_id']}:personality_agent"
     prompt = "Create the personality of the next influencer"
     human_feedback = state.get("feedback")
-    _ = call_specialist_agent("personality_agent", prompt, thread_id, state.get("influencer_name"), feedback=human_feedback)
+    _, voice_name = call_specialist_agent("personality_agent", prompt, thread_id, state.get("influencer_name"), feedback=human_feedback)
     with open(f"src/influencers/{state.get("influencer_name")}/PERSONALITY.md", "r", encoding="utf-8") as f:
         personality_description = f.read()
-    return {"personality": personality_description}
+    return {"personality": personality_description, "voice_name": voice_name}
 
 def call_backstory_agent_node(state: PersonaWorkflowState, *, config: RunnableConfig) -> dict:
     thread_id = f"{config['configurable']['thread_id']}:backstory_agent"
@@ -143,30 +145,33 @@ def call_review_router_node(state: PersonaWorkflowState) -> dict:
     return {"agent_to_review": decision.agent_to_review}
 
 def lessons_learned_node(state: PersonaWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
-    audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
+    all_traces = {}
+    for (name, agent) in [
+        ("character_design_agent", character_design_agent),
+        ("personality_agent", personality_agent),
+        ("backstory_agent", backstory_agent),
+    ]:
+        agent_thread_id = f"{config['configurable']['thread_id']}:{name}"
 
-    ll_extracter_agent = create_agent(
-        model=ChatOpenRouter(model=LL_EXTRACTOR_AGENT, temperature=.2),
-        tools=[LessonsLearnedExtracterAgentTools.save_learnable_traces],
-        state_schema=LLExtractorState,
-        store=store
-    )
+        traces = AgentTools.extract_learnable_traces(thread_id=agent_thread_id, agent=agent, active_agent=name)
+        result = auditor_agent.invoke({"messages": [("user", f"""
+                    Analyse the following traces from {name} by collecting the steps that were successully
+                    taken to solve the next part of the question AND should serve as a reinforcing
+                    example of how this question/issue should be solved. 
+                    In addition, make sure to collect those steps where the agent had troubles/failed
+                    to successfully, or smoothly, solve the part of the question/issue at hand AND should
+                    serve as a learning trace of what should be avoided in the future. 
+        
+                    Traces collected for this run: {traces}
 
-    traces = LessonsLearnedExtracterAgentTools.extract_learnable_traces(thread_id=audio_engineer_thread_id, agent=audio_engineer_agent)
-    result = ll_extracter_agent.invoke({"messages": [("user", f"""
-                Analyse the following traces by collecting the steps that were successully
-                taken to solve the next part of the question AND should serve as a reinforcing
-                example of how this question/issue should be solved. 
-                In addition, make sure to collect those steps where the agent had troubles/failed
-                to successfully, or smoothly, solve the part of the question/issue at hand AND should
-                serve as a learning trace of what should be avoided in the future. 
-    
-                Traces collected for this run: {traces}
+                    Followingly, return back a summary of the traces you saved to the user.
+        """)],
+            "influencer_name": state.get("influencer_name"),
+            "department_name": "persona_identity"
+        })
+        all_traces[name] = result["messages"][-1].content
 
-                Followingly, return back a summary of the traces you saved to the user.
-    """)]})
-
-    return {"lessons_learned": result["messages"][-1].content}
+    return {"lessons_learned": all_traces}
 
 def routing_function(state: PersonaWorkflowState) -> str:
     agent = state["agent_to_review"]
@@ -190,7 +195,7 @@ builder.add_node("call_backstory_agent", call_backstory_agent_node)
 builder.add_node("human_review", human_review_node)
 builder.add_node("call_review_router", call_review_router_node)
 builder.add_node("gen_image_samples", gen_image_node)
-# builder.add_node("lessons_learned_path", lessons_learned_node)
+builder.add_node("lessons_learned_path", lessons_learned_node)
 
 builder.add_edge(START, "call_character_design_agent")
 builder.add_conditional_edges(
@@ -204,14 +209,14 @@ builder.add_edge("call_backstory_agent", "human_review")
 
 builder.add_conditional_edges(
     "human_review", 
-    lambda state: END if state["status"] == "approved" else "call_review_router",
+    lambda state: "lessons_learned_path" if state["status"] == "approved" else "call_review_router",
     )
 builder.add_conditional_edges(
     "call_review_router",
     routing_function,
     ["call_character_design_agent", "call_personality_agent", "call_backstory_agent"],
     )
-# builder.add_edge("lessons_learned_path", END)
+builder.add_edge("lessons_learned_path", END)
 
 persona_gen_graph = builder.compile(checkpointer)
 

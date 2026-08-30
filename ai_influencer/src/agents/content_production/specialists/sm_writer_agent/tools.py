@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ...utils import FileEditingTools, SkillLoadingTools
 from .state import ContentCreatorState
-from ....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL
+from .....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL
 
 load_dotenv()
 

@@ -8,7 +8,7 @@ from langchain.agents.middleware import after_agent, AgentState
 from langgraph.runtime import Runtime
 from langchain.messages import AIMessage, HumanMessage
 
-from ....models import SAFETY_MODEL
+from .....models import SAFETY_MODEL
 from .state import ContentCreatorState
 
 class OutputDecisionSchema(BaseModel):

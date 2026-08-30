@@ -13,7 +13,7 @@ from langchain.agents.middleware.types import ModelRequest
 
 from langchain.agents.middleware import before_agent
 
-from ....models import PERSONALITY_AGENT
+from .....models import PERSONALITY_AGENT
 from .tools import AgentTools
 from .state import PersonalityState
 from ...utils import checkpointer

@@ -1,7 +1,6 @@
 # TODO
-- Develop Persona & Identity tier + auditor
-- Develop Content Production tier + auditor
-- Develop Engagement & Community tier + auditor
+- Add auditors + memory management (persona creation: save key points of previous influencers; content creation: save the characters journey) + orchestrator + TUI
+- Develop Engagement & Community tier
 - Implement self-evolution
 
 # Under development

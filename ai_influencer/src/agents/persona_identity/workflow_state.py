@@ -1,4 +1,4 @@
-from typing import TypedDict, Literal, Optional
+from typing import TypedDict, Literal, Optional, Dict
 from langchain.agents import AgentState
 from typing_extensions import NotRequired
 
@@ -17,12 +17,13 @@ class PersonaWorkflowState(TypedDict):
     character: NotRequired[str]
     personality: NotRequired[str]
     backstory: NotRequired[str]
+    voice_name: NotRequired[str]
 
     # rubric_scores: RubricScores
     agent_to_review: Optional[Literal["backstory_agent", "personality_agent", "character_design_agent"]]
     status: Literal["approved", "needs_revision"]
     feedback: Optional[str]
-    # lessons_learned: str
+    lessons_learned: Dict[str, str]
 
 class AudioEngineerState(AgentState):
     active_step: NotRequired[Literal["edit_audio", "score_final_result"]]

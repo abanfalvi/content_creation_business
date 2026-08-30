@@ -11,7 +11,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from ....models import CONTENT_CALENDAR_AGENT
+from .....models import CONTENT_CALENDAR_AGENT
 from .tools import AgentTools
 from .state import ContentPlanningState
 from ...utils import checkpointer

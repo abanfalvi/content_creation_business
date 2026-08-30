@@ -1,7 +1,7 @@
 # Content Production Manager Agent
 # Aim: Coordinate the work in the department
 from dotenv import load_dotenv
-from typing import Tuple, List
+from typing import Tuple, List, Callable
 import opik, asyncio, json
 from datetime import date
 from opik.integrations.langchain import OpikTracer, track_langgraph
@@ -9,22 +9,26 @@ from pydantic import BaseModel, Field
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import FilesystemFileSearchMiddleware
+from langchain.agents.middleware import wrap_model_call
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage, HumanMessage
 from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState
 from typing_extensions import NotRequired
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from ..models import CONTENT_PRODUCTION_MANAGER
+from ...models import CONTENT_PRODUCTION_MANAGER
 from .specialists.content_strategist_agent.agent import content_strategist_agent
 from .specialists.sm_writer_agent.agent import sm_content_writer_agent
 from .utils import checkpointer, FileEditingTools
 from .mcp import get_buffer_mcp
+from ...auditor.agent import auditor_agent
+from ...auditor.tools import AgentTools
 
 class ManagerState(AgentState):
     influencer_name: str
     voice_name: str
+    active_step: str
     img_url: NotRequired[str]
     audio_url: NotRequired[str]
     video_url: NotRequired[str]
@@ -66,6 +70,7 @@ class ManagerTools:
                 "img_url": result.get("img_url"),
                 "video_url": result.get("video_url"),
                 "lipsynced": result.get("lipsynced"),
+                "active_step": "trace_auditing"
             }
         )
 
@@ -86,6 +91,36 @@ class ManagerTools:
 
         return f"Today's date is: {str(date.today())}", content_calendar
 
+    @tool
+    def call_auditor(runtime: ToolRuntime[None, ManagerState]):
+        "Call the auditor to analyse the traces took by the specialists agents"
+        all_traces = {}
+        for (name, agent) in [
+            ("content_strategist_agent", content_strategist_agent),
+            ("sm_content_writer_agent", sm_content_writer_agent),
+        ]:
+            agent_thread_id = f"{runtime.config["configurable"]["thread_id"]}:{name}"
+    
+            traces = AgentTools.extract_learnable_traces(thread_id=agent_thread_id, agent=agent, active_agent=name)
+            result = auditor_agent.invoke({"messages": [("user", f"""
+                        Analyse the following traces from {name} by collecting the steps that were successully
+                        taken to solve the next part of the question AND should serve as a reinforcing
+                        example of how this question/issue should be solved. 
+                        In addition, make sure to collect those steps where the agent had troubles/failed
+                        to successfully, or smoothly, solve the part of the question/issue at hand AND should
+                        serve as a learning trace of what should be avoided in the future. 
+            
+                        Traces collected for this run: {traces}
+    
+                        Followingly, return back a summary of the traces you saved to the user.
+            """)],
+                "influencer_name": runtime.state.get("influencer_name"),
+                "department_name": "content_production"
+            })
+            all_traces[name] = result["messages"][-1].content
+
+        return all_traces
+
 
 content_manager_model = ChatOpenRouter(
     model=CONTENT_PRODUCTION_MANAGER,
@@ -98,6 +133,37 @@ opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency",
 with open(r"src\agents\content_production\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
+STEP_CONFIG = {
+    "content_creation": {
+        "tools": [
+            ManagerTools.call_content_strategist_agent,
+            ManagerTools.call_sm_content_writer_agent,
+            ManagerTools.read_content_calendar
+        ]
+    },
+    "trace_auditing": {
+        "tools": [ManagerTools.call_auditor]
+    }
+}
+
+@wrap_model_call
+def apply_step_config(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse],
+) -> ModelResponse:
+    """Configure agent behavior based on the current step."""
+    active_agent = request.state.get("active_step")
+    
+    # Look up step configuration
+    stage_config = STEP_CONFIG[active_agent]
+
+    # Inject system prompt and step-specific tools
+    request = request.override(
+        tools=stage_config["tools"],
+    )
+
+    return handler(request)
+
 async def build_content_manager_agent():
     sm_management_tools = await get_buffer_mcp()
     agent = create_agent(
@@ -106,6 +172,7 @@ async def build_content_manager_agent():
             ManagerTools.call_content_strategist_agent,
             ManagerTools.call_sm_content_writer_agent,
             ManagerTools.read_content_calendar,
+            ManagerTools.call_auditor,
             # *sm_management_tools,
         ],
         system_prompt=SYSTEM_PROMPT,
@@ -122,6 +189,7 @@ content_manager_agent = create_agent(
         ManagerTools.call_content_strategist_agent,
         ManagerTools.call_sm_content_writer_agent,
         ManagerTools.read_content_calendar,
+        ManagerTools.call_auditor,
         # *sm_management_tools,
     ],
     system_prompt=SYSTEM_PROMPT,

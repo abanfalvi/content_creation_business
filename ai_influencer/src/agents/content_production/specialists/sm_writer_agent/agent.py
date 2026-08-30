@@ -10,7 +10,7 @@ from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 
-from ....models import SM_CONTENT_WRITER_AGENT
+from .....models import SM_CONTENT_WRITER_AGENT
 from .tools import AgentTools
 from .state import ContentCreatorState
 from ...utils import checkpointer

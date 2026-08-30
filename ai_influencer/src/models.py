@@ -18,3 +18,9 @@ SAFETY_MODEL="qwen/qwen3.7-flash"
 REPLY_AGENT="upstage/solar-pro4"
 FOLLOWER_GROWTH_HEALTH_AGENT="upstage/solar-pro4"
 ENGAGEMENT_MANAGER="z-ai/glm-5.3-flash"
+
+# Auditor
+AUDITOR_MODEL="qwen/qwen3.7-flash"
+
+# Orchestrator
+ORCHESTRATOR="upstage/solar-pro4"
