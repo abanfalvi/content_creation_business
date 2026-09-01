@@ -3,7 +3,6 @@
 
 from dotenv import load_dotenv
 from typing import Any, Callable
-import opik, os
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
@@ -15,16 +14,15 @@ from .....models import CONTENT_CALENDAR_AGENT
 from .tools import AgentTools
 from .state import ContentPlanningState
 from ...utils import checkpointer
+from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 content_strategist_model = ChatOpenRouter(
     model=CONTENT_CALENDAR_AGENT,
     temperature=0.5,
-    max_tokens=8192
+    max_tokens=4096
 )
-
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
 
 with open(r"src\agents\content_production\specialists\content_strategist_agent\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
@@ -33,9 +31,11 @@ all_tools = [
     AgentTools.add_calendar_entry,
     AgentTools.edit_calendar_entry,
     AgentTools.list_upcoming_contents,
-    AgentTools.mark_posted,
     AgentTools.read_persona_info,
-    AgentTools.get_current_date
+    AgentTools.get_current_date,
+    AgentTools.save_influencer_journey,
+    AgentTools.load_influencer_journey,
+    AgentTools.content_strategy
 ]
 
 STEP_CONFIG = {
@@ -83,7 +83,8 @@ content_strategist_agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[],
     state_schema=ContentPlanningState,
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    store=shared_memory_store
 )
 
 opik_tracer = OpikTracer()

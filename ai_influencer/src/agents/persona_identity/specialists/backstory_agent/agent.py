@@ -3,7 +3,7 @@
 
 from dotenv import load_dotenv
 from typing import Any
-import opik, os
+import os
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
@@ -15,16 +15,15 @@ from .....models import BACKSTORY_AGENT
 from .tools import AgentTools
 from .state import BackstoryState
 from ...utils import checkpointer
+from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 backstory_model = ChatOpenRouter(
     model=BACKSTORY_AGENT,
     temperature=0.5,
-    max_tokens=8192
+    max_tokens=4096
 )
-
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
 
 @dynamic_prompt
 def inject_character_design(request: ModelRequest) -> str:
@@ -48,6 +47,7 @@ all_tools = [
     AgentTools.read_influencer_backstory,
     AgentTools.load_skill_content,
     AgentTools.edit_influencer_backstory,
+    AgentTools.check_existing_influencers,
 ]
 
 backstory_agent = create_agent(
@@ -56,7 +56,8 @@ backstory_agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[inject_character_design],
     state_schema=BackstoryState,
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    store=shared_memory_store,
 )
 
 opik_tracer = OpikTracer()

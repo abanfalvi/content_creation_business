@@ -1,7 +1,7 @@
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from pathlib import Path
-import base64
+import base64, re
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents.middleware import after_agent, AgentState
@@ -65,25 +65,59 @@ def safe_output_guardrail(state: ContentCreatorState, runtime: Runtime) -> dict[
         caption = f.read()
 
     is_video = bool(state.get("video_url"))
+    is_lipsynced = bool(state.get("lipsynced"))
     media_type = "video" if is_video else "image"
     mime_type = "video/mp4" if is_video else "jpeg"
-    new_url = state.get("video_url") if is_video else state.get("img_url")
+    if is_lipsynced:
+        new_url = state.get("lipsynced")
+    elif is_video:
+        new_url = state.get("video_url")
+    else:
+        new_url = state.get("img_url")
+
+    if new_url is None:
+        return None
+
+    headings = list(re.finditer(r"^#{1,6}.*$", caption, flags=re.MULTILINE))
+    if headings:
+        caption = caption[headings[-1].start():]
 
     # Use a model to evaluate safety
-    safety_prompt = HumanMessage(content=[
-        {"type": "text", "text": 
-                f"""Evaluate if these {media_type} and caption do not contain NSFW and are harmless and do not give any form of advice.
-                Respond according to the provided schema.
-            
-                Caption: {caption}"""},
-        {
-            "type": media_type,
-            "url": new_url,
-            "mime_type": mime_type,
-        },
-    ])
+    if isinstance(new_url, list):
+        safety_prompt = HumanMessage(content=[
+            {"type": "text", "text": 
+                    f"""Evaluate if these {media_type} and caption do not contain NSFW and are harmless and do not give any form of advice.
+                    Respond according to the provided schema.
+                
+                    Caption: {caption}"""},
+            *[{
+                "type": media_type,
+                "url": url,
+                "mime_type": mime_type,
+            } for url in new_url],
+        ])
+    else:
+        safety_prompt = HumanMessage(content=[
+            {"type": "text", "text": 
+                    f"""Evaluate if these {media_type} and caption do not contain NSFW and are harmless and do not give any form of advice.
+                    Respond according to the provided schema.
+                
+                    Caption: {caption}"""},
+            {
+                "type": media_type,
+                "url": new_url,
+                "mime_type": mime_type,
+            },
+        ])
 
-    result = structured_safety_model.invoke([safety_prompt])
+    for attempt in range(3):
+        try:
+            result = structured_safety_model.invoke([safety_prompt])
+            break
+        except:
+            if attempt == 2:
+                return None
+            continue
 
     if not result.safe:
         return {
@@ -110,9 +144,18 @@ def consistency_check_guardrail(state: ContentCreatorState, runtime: Runtime) ->
         character = f.read()
 
     is_video = bool(state.get("video_url"))
+    is_lipsynced = bool(state.get("lipsynced"))
     media_type = "video" if is_video else "image"
     mime_type = "video/mp4" if is_video else "jpeg"
-    new_url = state.get("video_url") if is_video else state.get("img_url")
+    if is_lipsynced:
+        new_url = state.get("lipsynced")
+    elif is_video:
+        new_url = state.get("video_url")
+    else:
+        new_url = state.get("img_url")
+
+    if new_url is None:
+        return None
 
     def convert_media_to_base64(file: Path):
         with open(file, "rb") as f:
@@ -124,24 +167,49 @@ def consistency_check_guardrail(state: ContentCreatorState, runtime: Runtime) ->
     history_files = sorted(Path(f"{media_content_path}/{subfolder}").glob(ext))[-5:-1]
     history_files = [convert_media_to_base64(file) for file in history_files]
 
-    safety_prompt = HumanMessage(content=[
-        {"type": "text", "text": 
-                f"""Evaluate if these {media_type} and the predetermined
-                character description are consistent with the newly created video content.
-                Respond according to the provided schema.
-                
-                Character description:\n{character}"""},
-        {"type": "text", "text": "NEW CONTENT TO EVALUATE:"},
-        {"type": media_type, "url": new_url, "mime_type": mime_type},
-        {"type": "text", "text": "PREVIOUSLY PUBLISHED REFERENCE CONTENT (for comparison only — do not evaluate these, only the item above):"},
-        *[{
-            "type": media_type,
-            "base64": file,
-            "mime_type": mime_type,
-        } for file in history_files],
-    ])
+    if isinstance(new_url, list):
+        safety_prompt = HumanMessage(content=[
+            {"type": "text", "text": 
+                    f"""Evaluate if these {media_type} and the predetermined
+                    character description are consistent with the newly created video content.
+                    Respond according to the provided schema.
+                    
+                    Character description:\n{character}"""},
+            {"type": "text", "text": "NEW CONTENT TO EVALUATE:"},
+            *[{"type": media_type, "url": url, "mime_type": mime_type} for url in new_url],
+            {"type": "text", "text": "PREVIOUSLY PUBLISHED REFERENCE CONTENT (for comparison only — do not evaluate these, only the item above):"},
+            *[{
+                "type": media_type,
+                "base64": file,
+                "mime_type": mime_type,
+            } for file in history_files],
+        ])
+    else:
+        safety_prompt = HumanMessage(content=[
+            {"type": "text", "text": 
+                    f"""Evaluate if these {media_type} and the predetermined
+                    character description are consistent with the newly created video content.
+                    Respond according to the provided schema.
+                    
+                    Character description:\n{character}"""},
+            {"type": "text", "text": "NEW CONTENT TO EVALUATE:"},
+            {"type": media_type, "url": new_url, "mime_type": mime_type},
+            {"type": "text", "text": "PREVIOUSLY PUBLISHED REFERENCE CONTENT (for comparison only — do not evaluate these, only the item above):"},
+            *[{
+                "type": media_type,
+                "base64": file,
+                "mime_type": mime_type,
+            } for file in history_files],
+        ])
 
-    result = structured_consistency_model.invoke([safety_prompt])
+    for attempt in range(3):
+        try:
+            result = structured_consistency_model.invoke([safety_prompt])
+            break
+        except:
+            if attempt == 2:
+                return None
+            continue
 
     if not result.consistent:
         return {
@@ -174,6 +242,10 @@ def check_caption_consistency(state: ContentCreatorState, runtime: Runtime) -> d
     with open(backstory_path, "r", encoding="utf-8") as f:
         backstory = f.read()
 
+    headings = list(re.finditer(r"^#{1,6}.*$", caption, flags=re.MULTILINE))
+    if headings:
+        caption = caption[headings[-1].start():]
+
     review_prompt = f"""Evaluate whether the newly written caption is consistent with the influencer's
     established voice, personality, and backstory. Respond according to the provided schema.
 
@@ -186,7 +258,14 @@ def check_caption_consistency(state: ContentCreatorState, runtime: Runtime) -> d
     Backstory:
     {backstory}"""
 
-    result = structured_caption_model.invoke([HumanMessage(content=review_prompt)])
+    for attempt in range(3):
+        try:
+            result = structured_caption_model.invoke([HumanMessage(content=review_prompt)])
+            break
+        except:
+            if attempt == 2:
+                return None
+            continue
 
     if not result.consistent:
         return {

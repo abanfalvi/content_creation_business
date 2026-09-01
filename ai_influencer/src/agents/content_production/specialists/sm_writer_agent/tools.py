@@ -1,25 +1,46 @@
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage, HumanMessage
 from langchain.tools import tool, ToolRuntime
+from langchain_openrouter import ChatOpenRouter
 
-import wave, io, os, base64, time, httpx
+import wave, io, os, base64, time, httpx, json
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 from openrouter import OpenRouter, utils
 import fal_client
 from datetime import datetime
 from pathlib import Path
+from pydantic import BaseModel, Field
 
 from ...utils import FileEditingTools, SkillLoadingTools
 from .state import ContentCreatorState
-from .....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL
+from .....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL, MEMORY_MANAGEMENT_MODEL
 
 load_dotenv()
 
-def get_base64_image(filepath: str):
-    with open(filepath, "rb") as f:
-        img_bytes = f.read()
-    return img_bytes
+class CharacterFeatures(BaseModel):
+    consistency_anchors: List[str] = Field(
+        description="The fixed features that MUST appear identically in every generated asset (e.g. exact hair color hex, skin tone hex, eye color, distinguishing marks, build) — the highest-priority details for image/video prompt consistency."
+    )
+    face_features: List[str] = Field(
+        description="Condensed, prompt-ready face descriptors: shape, skin tone/texture, eye color and shape, brows, nose, mouth, cheekbones/jawline, chin — as short visual phrases usable directly in a generation prompt."
+    )
+    hair: List[str] = Field(
+        description="Hair color (hex), texture, length, default style, and the allowed variation range (e.g. ponytail, braid) usable in a generation prompt."
+    )
+    body: List[str] = Field(
+        description="Height, build/frame, proportions, muscle tone, posture, and body skin tone — condensed to prompt-ready visual phrases."
+    )
+    signature_outfits: List[str] = Field(
+        description="Named signature looks with their exact garments, colors (hex where given), and styling details, ready to drop into an image/video prompt (e.g. 'Training Day: high-waisted black leggings, fitted white cropped tank...')."
+    )
+    accessories_and_makeup: List[str] = Field(
+        default_factory=list,
+        description="Fixed/recurring accessories (rings, jewelry, footwear) and default makeup style, as prompt-ready phrases."
+    )
+    negative_constraints: List[str] = Field(
+        description="Things that must never appear in generated visuals (e.g. no tattoos, no freckles, no heavy makeup) — usable as negative-prompt guidance."
+    )
 
 class AgentTools:
 
@@ -64,13 +85,21 @@ class AgentTools:
         )
 
     @tool
-    def edit_image(prompt: str, filename: str, runtime: ToolRuntime[None, ContentCreatorState], use_reference_img: bool = False) -> Command:
-        "Edit the most recently generated image (img_url in state) per the given prompt and save the result as '{filename}.jpg' under the influencer's social_contents/images folder. Set use_reference_img=True to instead edit starting from the influencer's locked character reference images (reference_imgs in state, set via retrieve_previous_images) for stronger identity consistency. Returns the edited image for you to inspect and updates its hosted URL in state as img_url."
-        image_urls = [runtime.state.get("img_url")] if not use_reference_img else runtime.state.get("reference_imgs")
-        if not image_urls:
-            return f"No {'reference images' if use_reference_img else 'previously generated image'} found in state — nothing to edit."
+    def edit_image(prompt: str, filename: str, runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
+        "Edit an image per the given prompt, grounded against the influencer's most recently generated images (or, if none exist yet, her locked reference photos), and save the result as '{filename}.jpg' under the influencer's social_contents/images folder. Reference images are fetched automatically — no other tool call needed first. Returns the edited image for you to inspect and updates its hosted URL in state as img_url."
+        influencer_name = runtime.state.get("influencer_name")
+        prev_images_folder = f"src/influencers/{influencer_name}/social_contents/images"
+        image_urls = []
+        if Path(prev_images_folder).exists():
+            # Retrieve the last three images for the agent
+            history_files = sorted(Path(prev_images_folder).glob("*.jpg"))[-3:]
+            [image_urls.append(fal_client.upload_file(file)) for file in history_files]
+
+        sample_images_folder = f"src/influencers/{influencer_name}/img"
+        history_files = sorted(Path(sample_images_folder).glob("*.jpg"))[:3]
+        [image_urls.append(fal_client.upload_file(file)) for file in history_files]
+
         today = datetime.now().strftime("%Y%m%d_%H%M%S")
-        full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/images"
 
         result = fal_client.submit(
             "meta/muse-image/edit",
@@ -83,14 +112,14 @@ class AgentTools:
 
         edited_url = result["images"][0]["url"]
         image_bytes = httpx.get(edited_url).content
-        with open(f"{full_output_path}/{today}_{filename}.jpg", "wb") as f:
+        with open(f"{prev_images_folder}/{today}_{filename}.jpg", "wb") as f:
             f.write(image_bytes)
 
         return Command(update={
             "messages":[
                 ToolMessage(content= "Image has been successfully edited and saved", tool_call_id=runtime.tool_call_id),
                 HumanMessage(content=[
-                    {"type": "text", "text": f"The generated image ({full_output_path}) is the following:"},
+                    {"type": "text", "text": f"The generated image ({prev_images_folder}) is the following:"},
                     {
                         "type": "image",
                         "url": edited_url,
@@ -98,13 +127,13 @@ class AgentTools:
                     },
                 ]),
             ],
-            "img_url": edited_url
+            "img_url": [edited_url]
         })
 
     @tool
     def generate_video(prompt: str, filename: str, duration: int, runtime: ToolRuntime[None, ContentCreatorState], from_image: bool = False) -> Command:
-        "Generate a short video from a text prompt via OpenRouter and save it as '{filename}.mp4' under the influencer's social_contents/videos folder. Set from_image=True to animate the most recently generated image (img_url in state) as the video's first frame instead of generating from text alone. duration is in seconds and capped at 15. Returns the video for you to inspect and stores its hosted URL in state as video_url."
-        assert duration <= 15, "Duration must be max 15 seconds long"
+        "Generate a short video from a text prompt via OpenRouter and save it as '{filename}.mp4' under the influencer's social_contents/videos folder. Set from_image=True to animate the most recently generated image (img_url in state) as the video's first frame instead of generating from text alone. duration is in seconds and capped at 10. Returns the video for you to inspect and stores its hosted URL in state as video_url."
+        assert duration <= 10, "Duration must be max 10 seconds long"
         full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/videos"
         os.makedirs(full_output_path, exist_ok=True)
         retries = utils.RetryConfig("backoff", utils.BackoffStrategy(500, 5000, 1.5, 30000), False)
@@ -117,13 +146,14 @@ class AgentTools:
                 aspect_ratio="9:16",
                 resolution="720p",
                 frame_images=[{
-                    "image_url": {"url": runtime.state.get("img_url")},
+                    "image_url": {"url": runtime.state.get("img_url")[-1]},
                     "type": "image_url",
                     "frame_type": "first_frame",
                 }] if from_image else None,
                 duration=duration,
                 timeout_ms=60000,
                 retries=retries,
+                generate_audio=False
             )
 
             poll_interval_s = 10
@@ -240,47 +270,6 @@ class AgentTools:
         )
 
     @tool
-    def retrieve_previous_images(runtime: ToolRuntime[None, ContentCreatorState]):
-        "Load the two most recently generated images (or, if none exist yet, two of the influencer's sample reference photos) and store their hosted URLs in state as reference_imgs, for use with edit_image's use_reference_img option."
-        influencer_name = runtime.state.get("influencer_name")
-        prev_images_folder = f"src/influencers/{influencer_name}/social_contents/images"
-        if Path(prev_images_folder).exists():
-            # Retrieve the last two images for the agent
-            history_files = sorted(Path(prev_images_folder).glob("*.jpg"))[-2:]
-            image_1 = fal_client.upload_file(history_files[0])
-            image_2 = fal_client.upload_file(history_files[1])
-            # image_1 = get_base64_image(history_files[0])
-            # image_2 = get_base64_image(history_files[1])
-        else:
-            sample_images_folder = f"src/influencers/{influencer_name}/img"
-            history_files = sorted(Path(sample_images_folder).glob("*.jpg"))[:2]
-            image_1 = fal_client.upload_file(history_files[0])
-            image_2 = fal_client.upload_file(history_files[1])
-            # image_1 = get_base64_image(history_files[0])
-            # image_2 = get_base64_image(history_files[1])
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(content=f"Previous images have been found!", tool_call_id=runtime.tool_call_id),
-                    HumanMessage(content=[
-                        {"type": "text", "text": f"Find two of the previously generated images: "},
-                        {
-                            "type": "image",
-                            "url": image_1,
-                            "mime_type": "jpeg",
-                        },
-                        {
-                            "type": "image",
-                            "url": image_2,
-                            "mime_type": "jpeg",
-                        },
-                    ]),
-                ],
-                "reference_imgs": [image_1, image_2]
-            }
-        )
-
-    @tool
     def read_captions(runtime: ToolRuntime[None, ContentCreatorState]) -> str:
         "Read the influencer's CAPTION.md file content"
         influencer_name = runtime.state.get("influencer_name")
@@ -309,12 +298,28 @@ class AgentTools:
 
     @tool
     def read_persona_info(identity: Literal["CHARACTER", "PERSONALITY", "BACKSTORY"], runtime: ToolRuntime[None, ContentCreatorState]) -> str:
-        "Read the influencer's PERSONALITY.md or BACKSTORY.md file content"
+        "Read the influencer's PERSONALITY.md, BACKSTORY.md or CHARACTER.md file content"
         influencer_name = runtime.state.get("influencer_name")
+
+        stored_persona_info = runtime.store.get(("content_production", influencer_name), identity.lower())
+        if stored_persona_info:
+            return json.dumps(stored_persona_info.value)
+
         persona_path = f"src/influencers/{influencer_name}/{identity}.md"
 
         with open(persona_path, "r", encoding="utf-8") as f:
             persona = f.read()
+
+        # Extract the key aspects from it and save it for long term
+        extracter_model = ChatOpenRouter(model=MEMORY_MANAGEMENT_MODEL, temperature=.2)
+        extraction_prompt = f"Based on the provided schema, fill in the sections with the information about this influencer. Fill in those that you found information about:\n\n {persona}"
+
+        result = extracter_model.with_structured_output(schema=CharacterFeatures, method="json_schema").invoke(extraction_prompt)
+        runtime.store.put(
+            ("content_production", influencer_name,),
+            identity.lower(),
+            result.model_dump(),
+        )
 
         return persona
 

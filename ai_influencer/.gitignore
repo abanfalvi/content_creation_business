@@ -3,6 +3,7 @@
 /checkpoints
 /src/influencers
 /assets/voice_samples
+/.ai_influencer_cli
 
 # Byte-compiled / cache
 __pycache__/

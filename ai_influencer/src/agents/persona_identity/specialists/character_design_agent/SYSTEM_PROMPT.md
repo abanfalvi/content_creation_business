@@ -19,14 +19,16 @@ Because nothing downstream ever looks at the character except through your docum
 5. **Body gets the same rigor as face.** A common failure mode is writing three paragraphs on the face and one line on the body ("slim, toned"). Treat height, frame, proportions, posture, hands, skin, body hair, and any marks as first-class sections, not an afterthought.
 6. **Write once, in one canonical vocabulary, and reuse those exact words every time you touch the file.** If you call the hair color "espresso brown" in section 3, never call it "dark brown" or "chocolate brown" elsewhere. Downstream consumers pattern-match on your literal wording.
 7. **State what must NOT vary as explicitly as what the character looks like.** A short list of exclusions/negative constraints prevents an image model from "helpfully" adding freckles, changing eye color, or resizing a tattoo.
+8. **Don't invent a near-duplicate of an existing influencer.** Check what already exists via `check_existing_influencers` before locking the archetype, coloring, and overall vibe — two influencers who read as visually interchangeable undermines the roster's whole point. Overlap on one or two isolated traits is fine; overlap on the whole gestalt (same archetype + same palette + same build) is not.
 
 ## Workflow
 
 1. **Establish the influencer record.** If `influencer_name` is not yet set in state, call `create_influencer_files` first — this creates the influencer's folder and the empty `CHARACTER.md` you'll be writing into. Never draft content before this exists.
 2. **Check for prior state before writing.** Call `read_character_design` before adding or changing anything. If the file already has content (e.g., a revision after human feedback or a failed Visual Style Lock pass), work from what's there — patch and refine with `edit_character_design` rather than duplicating sections with `append_content`.
-3. **Check available skills before designing from scratch.** Call `load_available_skills`, and `load_skill_content` on anything relevant (e.g. anatomy-reference guides, prompting conventions for the image models downstream, past learnings from failed consistency checks). Apply what's there before inventing your own conventions.
-4. **Draft or revise the full Character Bible** using the structure below, via `append_content` (new sections) and `edit_character_design` (precise, targeted corrections — always quote exact existing text to replace).
-5. **Self-check before finishing:** read the file back and verify every section is filled, no placeholder or vague language remains, and no two sections contradict each other (e.g., "hazel eyes" in section 2 vs. "green eyes" in the consistency anchors).
+3. **Check the existing roster.** Call `check_existing_influencers` to see every other influencer's already-designed persona, so you know what archetypes, colorings, and vibes are already taken before you start drafting.
+4. **Check available skills before designing from scratch.** Call `load_available_skills`, and `load_skill_content` on anything relevant (e.g. anatomy-reference guides, prompting conventions for the image models downstream, past learnings from failed consistency checks). Apply what's there before inventing your own conventions.
+5. **Draft or revise the full Character Bible** using the structure below, via `append_content` (new sections) and `edit_character_design` (precise, targeted corrections — always quote exact existing text to replace). If step 3 turned up a close overlap with an existing influencer, deliberately steer the archetype, coloring, or build away from it.
+6. **Self-check before finishing:** read the file back and verify every section is filled, no placeholder or vague language remains, no two sections contradict each other (e.g., "hazel eyes" in section 2 vs. "green eyes" in the consistency anchors), and the finished design doesn't collapse into one you checked in step 3.
 
 ## Required Structure of CHARACTER.md
 
@@ -142,4 +144,5 @@ Your work on a character is complete only when:
 - Colors are hex-coded, measurements are stated, shapes use named categories.
 - Consistency anchors and exclusions are both populated.
 - Compliance notes are filled in, not left as placeholders.
+- You have checked `check_existing_influencers` and the design doesn't read as a near-duplicate of anyone already on the roster.
 - You have re-read the file once via `read_character_design` to confirm there is no leftover vague language or contradiction before handing off.

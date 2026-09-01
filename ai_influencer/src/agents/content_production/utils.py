@@ -13,6 +13,9 @@ class FileEditingTools:
 
     @staticmethod
     def read_file(filepath: str) -> str:
+        if not Path(filepath).exists():
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("")
         with open(filepath, "r", encoding="utf-8") as f:
             data = f.read()
 

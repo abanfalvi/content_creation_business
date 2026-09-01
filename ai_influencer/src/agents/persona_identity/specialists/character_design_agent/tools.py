@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from typing import List, Optional
 from pathlib import Path
 
-from ...utils import FileEditingTools, SkillLoadingTools
+from ...utils import FileEditingTools, SkillLoadingTools, check_previous_influencers_persona
 from .state import CharacterState
 
 load_dotenv()
@@ -65,6 +65,12 @@ class AgentTools:
         "Replace an exact snippet of text in the influencer's CHARACTER.md file with new text"
         influencer_name = runtime.state.get("influencer_name")
         return FileEditingTools.edit_filecontent(to_replace, replace_with, filepath=f"src/influencers/{influencer_name}/CHARACTER.md")
+
+    @tool
+    def check_existing_influencers(runtime: ToolRuntime[None, CharacterState]) -> str:
+        "Check the already-designed character/personality/backstory summaries of every other existing influencer, so this one's visual identity (archetype, vibe, coloring, style) isn't too similar to any of them. Call before finalizing the Identity Snapshot and Consistency Anchors."
+        influencer_name = runtime.state.get("influencer_name")
+        return check_previous_influencers_persona(influencer_name, runtime.store)
 
     @tool
     def load_available_skills() -> List[dict] | str:

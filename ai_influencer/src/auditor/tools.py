@@ -4,12 +4,13 @@ from langchain.tools import tool, ToolRuntime
 
 from langchain_openrouter import ChatOpenRouter
 import wave, io, os, base64, time, httpx, uuid, json
+from pathlib import Path
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 from openrouter import OpenRouter, utils
-import fal_client
 from datetime import date
-import threading
+from ..self_evolution import convert_to_skill
+from ..agents.persona_identity.utils import SkillLoadingTools
 
 load_dotenv()
 
@@ -50,6 +51,27 @@ class AgentTools:
             return "Undesired trace has been saved!"
 
     @tool
+    def call_skill_converter(runtime: ToolRuntime[None, AuditorState]) -> str:
+        "Convert this influencer's saved successful traces into reusable skill files for the relevant specialist agents, then remove those traces from the store."
+        convert_to_skill(runtime.state.get("influencer_name"), runtime.store)
+        return "Your created success traces have been converted to skills and deleted from storage"
+
+    @tool
+    def read_existing_skills(agent_name: Literal['backstory_agent', 'character_design_agent', 'personality_agent', 'content_strategist_agent', 'sm_writer_agent'], skill_name: str = "") -> str:
+        "Read the content of a specific skill file for the given specialist agent, by name. If you do not know the name of the specific skill, call the tool without, which will retrieve the list of skills belonging to the agent with their descriptions."
+        os.makedirs(f"src/agents/content_production/specialists/{agent_name}/skills", exist_ok=True)
+        if skill_name:
+            with open(f"src/agents/content_production/specialists/{agent_name}/skills/{skill_name}.md", "r", encoding="utf-8") as f:
+                data = f.read()
+            return data
+        else:
+            skills = list(Path(f"src/agents/content_production/specialists/{agent_name}/skills").glob("*.md"))
+            if skills:
+                return "\n\n".join([SkillLoadingTools.load_skill_names(path) for path in skills])
+            return "No skills found for this agent"
+
+
+    @staticmethod
     def update_task_board(task: str, runtime: ToolRuntime[None, AuditorState]) -> str:
         with open(f"src/auditor/TASK_BOARD.json", "r", encoding="utf-8") as f:
             task_board = json.load(f)
@@ -65,7 +87,7 @@ class AgentTools:
             "notes": notes
         })
 
-    @tool
+    @staticmethod
     def read_task_board() -> str:
         with open(f"src/auditor/TASK_BOARD.json", "r", encoding="utf-8") as f:
             task_board = json.load(f)

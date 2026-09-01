@@ -3,7 +3,7 @@
 
 from dotenv import load_dotenv
 from typing import Any
-import opik, os
+import os
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
@@ -17,16 +17,15 @@ from .....models import PERSONALITY_AGENT
 from .tools import AgentTools
 from .state import PersonalityState
 from ...utils import checkpointer
+from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 personality_model = ChatOpenRouter(
     model=PERSONALITY_AGENT,
     temperature=0.5,
-    max_tokens=8192
+    max_tokens=4096
 )
-
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
 
 @dynamic_prompt
 def inject_character_design(request: ModelRequest) -> str:
@@ -51,7 +50,8 @@ all_tools = [
     AgentTools.load_skill_content,
     AgentTools.read_influencer_personality,
     AgentTools.preview_voice,
-    AgentTools.select_influencer_voice
+    AgentTools.select_influencer_voice,
+    AgentTools.check_existing_influencers,
 ]
 
 personality_agent = create_agent(
@@ -60,7 +60,8 @@ personality_agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[inject_character_design],
     state_schema=PersonalityState,
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    store=shared_memory_store,
 )
 
 opik_tracer = OpikTracer()

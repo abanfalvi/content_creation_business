@@ -1,6 +1,6 @@
 
 from dotenv import load_dotenv
-import opik, os
+import os
 import base64
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
@@ -24,13 +24,13 @@ from .workflow_state import PersonaWorkflowState
 from ...models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL
 from ...auditor.tools import AgentTools
 from ...auditor.agent import auditor_agent
+from ...memory_store import shared_memory_store
 
 from langgraph.graph import StateGraph, START, END
 
 load_dotenv()
 
 opik_tracer = OpikTracer()
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
 
 class ReviewSelection(BaseModel):
     agent_to_review: Literal["backstory_agent", "personality_agent", "character_design_agent"] = Field(description="Select the backstory agent if the feedback is related to the interests, relationship or life narrative (backstory). Select the personality agent if the feedback is related to the influencer's inner values (personality). Select the character design agent if the feedback concerns the visual identity of the influencer.")
@@ -92,7 +92,7 @@ def gen_image_node(state: PersonaWorkflowState) -> dict:
         temperature=0.5
     )
     structured_model = prompt_gen_model.with_structured_output(schema=PromptsSchema, method="json_schema")
-    outcome = structured_model.invoke(f"Provide 4 slightly different prompts for image generation strictly using the provided character description. The person's look should always be the same, but in contexts.\n\n Character description:\n{state.get("character")}")
+    outcome = structured_model.invoke(f"Provide 5 different prompts for image generation strictly using the provided character description. The character should be in different surroundings, clothes, positions, etc..., so make sure there is enough variety. The person's look should always be the same, but in contexts.\n\n Character description:\n{state.get("character")}")
     generate_sample_images(prompts=outcome.prompts, influencer_name=state.get("influencer_name"))
     return {}
 
@@ -167,7 +167,8 @@ def lessons_learned_node(state: PersonaWorkflowState, *, store: BaseStore, confi
                     Followingly, return back a summary of the traces you saved to the user.
         """)],
             "influencer_name": state.get("influencer_name"),
-            "department_name": "persona_identity"
+            "department_name": "persona_identity",
+            "active_step": "save_traces"
         })
         all_traces[name] = result["messages"][-1].content
 
@@ -218,6 +219,6 @@ builder.add_conditional_edges(
     )
 builder.add_edge("lessons_learned_path", END)
 
-persona_gen_graph = builder.compile(checkpointer)
+persona_gen_graph = builder.compile(checkpointer, store=shared_memory_store)
 
 persona_gen_workflow = track_langgraph(persona_gen_graph, opik_tracer)

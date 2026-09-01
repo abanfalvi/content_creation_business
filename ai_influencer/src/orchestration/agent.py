@@ -3,7 +3,7 @@
 
 from dotenv import load_dotenv
 from typing import Any, Callable
-import opik, os
+import asyncio
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
@@ -12,6 +12,8 @@ from langchain.agents import create_agent
 from ..models import ORCHESTRATOR
 from .tools import AgentTools
 from .state import OrchestratorState
+from .utils import get_checkpointer
+from ..memory_store import shared_memory_store
 
 load_dotenv()
 
@@ -21,8 +23,6 @@ orchestrator_model = ChatOpenRouter(
     max_tokens=4096
 )
 
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
-
 with open(r"src\orchestration\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
@@ -31,12 +31,26 @@ all_tools = [
     AgentTools.run_persona_creation_workflow
 ]
 
-orchestrator_agent = create_agent(
-    model=orchestrator_model,
-    tools=all_tools,
-    system_prompt=SYSTEM_PROMPT,
-    state_schema=OrchestratorState,
-)
+async def build_orchestrator():
+    checkpointer = await get_checkpointer()
+    orchestrator_agent = create_agent(
+        model=orchestrator_model,
+        tools=all_tools,
+        system_prompt=SYSTEM_PROMPT,
+        state_schema=OrchestratorState,
+        checkpointer=checkpointer,
+        store=shared_memory_store,
+    )
 
-opik_tracer = OpikTracer()
-orchestrator_agent = track_langgraph(orchestrator_agent, opik_tracer)
+    opik_tracer = OpikTracer()
+    orchestrator_agent = track_langgraph(orchestrator_agent, opik_tracer)
+
+    return orchestrator_agent
+
+orchestrator_agent = None
+
+async def get_orchestrator_agent():
+    global orchestrator_agent
+    if orchestrator_agent is None:
+        orchestrator_agent = await build_orchestrator()
+    return orchestrator_agent

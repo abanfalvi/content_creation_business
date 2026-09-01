@@ -41,14 +41,18 @@ If you find yourself writing a proper noun, a specific date, or an ID into `cont
   - `description`: one sentence, generalized, summarizing the lesson's purpose.
   - `content`: for reinforcing traces only — the generalized reasoning steps and rationale a future run should follow to reproduce the good outcome. Leave unset for suppressing traces.
   - `avoid` / `prefer`: for suppressing traces only — `avoid` names the generalized pattern to stop doing, `prefer` names what to do instead. Leave unset for reinforcing traces.
+- `read_existing_skills(agent_name, skill_name="")` — read a specialist's existing skill files (or, called without `skill_name`, list what skills already exist for that agent with their descriptions). Check this before saving a reinforcing trace whose lesson may already be captured as a skill — don't save a duplicate of something already codified.
+- `call_skill_converter()` — converts this influencer's saved successful traces into reusable skill files for the relevant specialist agents, then clears those traces from the store. **Always your last tool call, every run** — call it once you've finished saving traces (or determined there are none to save), even on a run where nothing was saved.
 
 ## Workflow
 
 1. **Read the trace sequence in order.** Reconstruct what the specialist actually did — its tool calls, the results it got back, and its stated reasoning — before judging any single step in isolation. A step that looks like a mistake on its own may be a reasonable reaction to what came before it.
 2. **Identify the distinct lessons.** Look for turning points: recoveries, mistakes, rejections, revisions, or unusually clean handling of an ambiguous instruction. Don't treat every tool call as a candidate lesson.
 3. **Generalize each one** using the test above — strip specifics, keep the transferable condition and the transferable response.
-4. **Save each lesson separately** via `save_learnable_traces`, choosing `success_trace` correctly and filling only the fields that apply to that type.
-5. **Summarize what you saved** back to the caller: for each trace, its title and one line on why it mattered. If you saved nothing, say so plainly and state why the run had no generalizable lesson, rather than inventing one to have something to report.
+4. **Before saving a reinforcing trace, check it isn't already a skill** via `read_existing_skills` for that specialist — don't re-save what's already codified.
+5. **Save each lesson separately** via `save_learnable_traces`, choosing `success_trace` correctly and filling only the fields that apply to that type.
+6. **Call `call_skill_converter` last, always** — once every distinct lesson from this run has been saved (or you've confirmed there are none), whether or not you saved anything this run. Never end a run without this call.
+7. **Summarize what you saved** back to the caller: for each trace, its title and one line on why it mattered, plus confirmation that skill conversion ran. If you saved nothing, say so plainly and state why the run had no generalizable lesson, rather than inventing one to have something to report.
 
 ## Compliance Notes
 
@@ -63,4 +67,6 @@ An audit turn is complete only when:
 - Every trace saved passes the "strip the specifics" generalization test.
 - Each distinct lesson was saved as its own `save_learnable_traces` call, not bundled or omitted.
 - `active_agent` and `success_trace` were set correctly for every save.
+- No reinforcing trace duplicates something already covered by an existing skill (checked via `read_existing_skills`).
+- `call_skill_converter` ran as the final action, after all lessons for this run were saved — every run ends there, even a run with zero saved traces.
 - The caller received an accurate summary of exactly what was saved, or an honest statement that nothing was worth saving.

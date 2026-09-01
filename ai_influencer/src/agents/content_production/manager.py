@@ -2,10 +2,11 @@
 # Aim: Coordinate the work in the department
 from dotenv import load_dotenv
 from typing import Tuple, List, Callable
-import opik, asyncio, json
+import asyncio, json
 from datetime import date
 from opik.integrations.langchain import OpikTracer, track_langgraph
 from pydantic import BaseModel, Field
+import threading
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
@@ -23,7 +24,10 @@ from .specialists.sm_writer_agent.agent import sm_content_writer_agent
 from .utils import checkpointer, FileEditingTools
 from .mcp import get_buffer_mcp
 from ...auditor.agent import auditor_agent
+from ...memory_store import shared_memory_store
 from ...auditor.tools import AgentTools
+
+_calendar_lock = threading.Lock()
 
 class ManagerState(AgentState):
     influencer_name: str
@@ -70,7 +74,6 @@ class ManagerTools:
                 "img_url": result.get("img_url"),
                 "video_url": result.get("video_url"),
                 "lipsynced": result.get("lipsynced"),
-                "active_step": "trace_auditing"
             }
         )
 
@@ -83,13 +86,40 @@ class ManagerTools:
             content_calendar = json.load(f)
         content_calendar = "\n\n".join(
             f"{d}:\n" + "\n".join(
-                f"  - [{entry['status']}] {entry['theme']} ({entry['content_type']}, {', '.join(entry['platforms'])})"
+                f"  - {entry['id']} [{entry['status']}] {entry['theme']} ({entry['content_type']}, {', '.join(entry['platforms'])})"
                 for entry in entries
             )
             for d, entries in content_calendar.items()
         )
 
         return f"Today's date is: {str(date.today())}", content_calendar
+
+    @tool
+    def mark_posted(content_id: str, date: str, runtime: ToolRuntime[None, ManagerState]):
+        "Mark the calendar entry with the given id, under the given date, as POSTED"
+        influencer_name = runtime.state.get("influencer_name")
+        calendar_path = f"src/influencers/{influencer_name}/CALENDAR.json"
+
+        with _calendar_lock:
+            with open(calendar_path, "r", encoding="utf-8") as f:
+                content_calendar = json.load(f)
+
+            for date_time, content in content_calendar.items():
+                if date_time == date:
+                    for c in content:
+                        if c["id"] == content_id:
+                            c["status"] = "POSTED"
+                            break
+
+            with open(calendar_path, "w", encoding="utf-8") as f:
+                json.dump(content_calendar, f, indent=2)
+
+        return Command(update={
+            "messages": [
+                ToolMessage(content=f"{content_id} has been set to POSTED", tool_call_id=runtime.tool_call_id)
+            ],
+            "active_step": "trace_auditing"
+        })
 
     @tool
     def call_auditor(runtime: ToolRuntime[None, ManagerState]):
@@ -115,7 +145,8 @@ class ManagerTools:
                         Followingly, return back a summary of the traces you saved to the user.
             """)],
                 "influencer_name": runtime.state.get("influencer_name"),
-                "department_name": "content_production"
+                "department_name": "content_production",
+                "active_step": "save_traces"
             })
             all_traces[name] = result["messages"][-1].content
 
@@ -128,8 +159,6 @@ content_manager_model = ChatOpenRouter(
     max_tokens=2048
 )
 
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
-
 with open(r"src\agents\content_production\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
@@ -138,7 +167,8 @@ STEP_CONFIG = {
         "tools": [
             ManagerTools.call_content_strategist_agent,
             ManagerTools.call_sm_content_writer_agent,
-            ManagerTools.read_content_calendar
+            ManagerTools.read_content_calendar,
+            ManagerTools.mark_posted
         ]
     },
     "trace_auditing": {
@@ -178,6 +208,7 @@ async def build_content_manager_agent():
         system_prompt=SYSTEM_PROMPT,
         state_schema=ManagerState,
         checkpointer=checkpointer,
+        store=shared_memory_store,
         )
     opik_tracer = OpikTracer()
     agent = track_langgraph(agent, opik_tracer)
@@ -195,6 +226,7 @@ content_manager_agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     state_schema=ManagerState,
     checkpointer=checkpointer,
+    store=shared_memory_store,
     )
 opik_tracer = OpikTracer()
 content_manager_agent = track_langgraph(content_manager_agent, opik_tracer)

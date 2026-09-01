@@ -1,0 +1,54 @@
+[project]
+name = "ai-influencer-agency"
+version = "0.1.0"
+description = "Agent agency that designs, launches, and produces content for AI-generated influencer personas."
+readme = "assets/PROJECT.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite==0.22.1",
+    "fal-client==1.0.1",
+    "httpx==0.28.1",
+    "langchain==1.3.16",
+    "langchain-core==1.6.0",
+    "langchain-mcp-adapters==0.3.2",
+    "langchain-openrouter==0.2.8",
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-postgres==3.1.2",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "openrouter==0.11.46",
+    "opik==2.2.39",
+    "psycopg[binary,pool]==3.3.4",
+    "pydantic==2.12.5",
+    "pyfiglet==1.0.4",
+    "python-dotenv==1.2.3",
+    "python-frontmatter==1.3.0",
+    "rich==15.0.0",
+    "textual==8.2.8",
+    "typer==0.27.2",
+    "typing-extensions==4.16.0",
+]
+
+[project.optional-dependencies]
+notebook = [
+    "ipykernel",
+    "nest-asyncio",
+]
+dev = [
+    "pytest==9.1.1",
+]
+
+[project.scripts]
+influencer_agency = "src.cli.main:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+namespaces = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"

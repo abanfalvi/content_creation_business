@@ -1,5 +1,5 @@
-import frontmatter, os
-from typing import List
+import frontmatter, os, json
+from typing import List, Literal
 from pathlib import Path
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -63,3 +63,36 @@ class SkillLoadingTools:
             return all_metadata
         else:
             return "No skills available yet!"
+
+def check_previous_influencers_persona(current_influencer: str | None, store) -> str:
+    """Summarize every other already-designed influencer's persona, pulling the
+    distilled character/personality/backstory summaries Content Production
+    already saved to the shared store (same ("content_production", name)
+    namespace read_persona_info populates) rather than re-reading full .md
+    files, so a new persona can be checked for overlap without flooding
+    context with entire character bibles."""
+    influencers_dir = Path("src/influencers")
+    if not influencers_dir.exists():
+        return "No other influencers exist yet — nothing to compare against."
+
+    others = sorted(
+        p.name for p in influencers_dir.iterdir()
+        if p.is_dir() and p.name != current_influencer
+    )
+    if not others:
+        return "No other influencers exist yet — nothing to compare against."
+
+    profiles = []
+    for name in others:
+        sections = []
+        for identity in ("character", "personality", "backstory"):
+            stored = store.get(("content_production", name), identity)
+            if stored:
+                sections.append(f"{identity.upper()}: {json.dumps(stored.value)}")
+        if sections:
+            profiles.append(f"## {name}\n" + "\n".join(sections))
+
+    if not profiles:
+        return f"{len(others)} other influencer(s) exist ({', '.join(others)}), but none have a summarized persona yet."
+
+    return "\n\n".join(profiles)

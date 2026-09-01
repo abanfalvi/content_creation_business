@@ -1,7 +1,8 @@
 # TODO
-- Add auditors + memory management (persona creation: save key points of previous influencers; content creation: save the characters journey) + orchestrator + TUI
 - Develop Engagement & Community tier
-- Implement self-evolution
+- All tool calls should be seen + switch to streaming when necessary
+- Memory management
+- Implement self-evolution: correct failed traces
 
 # Under development
 

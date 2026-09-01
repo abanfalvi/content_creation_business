@@ -7,7 +7,7 @@ import json, frontmatter, os, base64
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 
-from ...utils import FileEditingTools, SkillLoadingTools
+from ...utils import FileEditingTools, SkillLoadingTools, check_previous_influencers_persona
 from .state import BackstoryState
 
 load_dotenv()
@@ -37,6 +37,12 @@ class AgentTools:
         "Replace an exact snippet of text in the influencer's BACKSTORY.md file with new text"
         influencer_name = runtime.state.get("influencer_name")
         return FileEditingTools.edit_filecontent(to_replace, replace_with, filepath=f"src/influencers/{influencer_name}/BACKSTORY.md")
+
+    @tool
+    def check_existing_influencers(runtime: ToolRuntime[None, BackstoryState]) -> str:
+        "Check the already-designed character/personality/backstory summaries of every other existing influencer, so this one's life story, hometown, career path, and interests aren't too similar to any of them. Call before finalizing the Life Timeline and Consistency Anchors."
+        influencer_name = runtime.state.get("influencer_name")
+        return check_previous_influencers_persona(influencer_name, runtime.store)
 
     @tool
     def load_available_skills() -> List[dict] | str:

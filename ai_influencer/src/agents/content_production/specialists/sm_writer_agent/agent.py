@@ -3,18 +3,18 @@
 
 from dotenv import load_dotenv
 from typing import Any
-import opik, os
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents.middleware import SummarizationMiddleware, TodoListMiddleware
 
 from .....models import SM_CONTENT_WRITER_AGENT
 from .tools import AgentTools
 from .state import ContentCreatorState
 from ...utils import checkpointer
 from .guardrails import consistency_check_guardrail, safe_output_guardrail, check_caption_consistency
+from .....memory_store import shared_memory_store
 
 load_dotenv()
 
@@ -25,8 +25,6 @@ sm_content_writer_model = ChatOpenRouter(
     timeout=120000,
     frequency_penalty=0.3
 )
-
-opik.configure(workspace="dreadnought0073", project_name="ai_influencer_agency", install_mcp=False)
 
 with open(r"src\agents\content_production\specialists\sm_writer_agent\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
@@ -43,7 +41,6 @@ all_tools = [
     AgentTools.generate_video,
     AgentTools.lipsync_video_wth_audio,
     AgentTools.edit_image,
-    AgentTools.retrieve_previous_images
 ]
 
 sm_content_writer_agent = create_agent(
@@ -56,11 +53,12 @@ sm_content_writer_agent = create_agent(
         check_caption_consistency,
         SummarizationMiddleware(
             model=ChatOpenRouter(model="inclusionai/ling-3.0-flash"),
-            trigger=15000,
-        )
+            trigger=("tokens", 15000),
+        ),
     ],
     state_schema=ContentCreatorState,
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    store=shared_memory_store
 )
 
 opik_tracer = OpikTracer()
