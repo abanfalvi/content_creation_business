@@ -7,7 +7,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware, TodoListMiddleware
+from langchain.agents.middleware import TodoListMiddleware
 
 from .....models import SM_CONTENT_WRITER_AGENT
 from .tools import AgentTools
@@ -41,6 +41,7 @@ all_tools = [
     AgentTools.generate_video,
     AgentTools.lipsync_video_wth_audio,
     AgentTools.edit_image,
+    AgentTools.compress_context,
 ]
 
 sm_content_writer_agent = create_agent(
@@ -51,10 +52,6 @@ sm_content_writer_agent = create_agent(
         safe_output_guardrail,
         consistency_check_guardrail,
         check_caption_consistency,
-        SummarizationMiddleware(
-            model=ChatOpenRouter(model="inclusionai/ling-3.0-flash"),
-            trigger=("tokens", 15000),
-        ),
     ],
     state_schema=ContentCreatorState,
     checkpointer=checkpointer,

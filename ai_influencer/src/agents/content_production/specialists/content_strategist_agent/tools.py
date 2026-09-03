@@ -101,7 +101,7 @@ class InfluencerJourney(BaseModel):
 class AgentTools:
 
     @tool
-    def add_calendar_entry(date: str, idea: str, content_type: Literal["image", "video", "text"], platforms: List[Literal["instagram", "tiktok", "thread"]], runtime: ToolRuntime[None, ContentPlanningState], notes: str = "") -> str:
+    def add_calendar_entry(date: str, idea: str, content_type: Literal["image", "video", "text"], platforms: List[Literal["instagram", "thread"]], runtime: ToolRuntime[None, ContentPlanningState], notes: str = "") -> str:
         "Add a new content idea to the influencer's CALENDAR.json under the given date (YYYY-MM-DD). A date may hold multiple entries."
         influencer_name = runtime.state.get("influencer_name")
         calendar_path = f"src/influencers/{influencer_name}/CALENDAR.json"
@@ -127,7 +127,7 @@ class AgentTools:
         return f"Entry has been added successfully for {date}!"
 
     @tool
-    def edit_calendar_entry(date: str, id: str, runtime: ToolRuntime[None, ContentPlanningState], idea: Optional[str] = None, content_type: Optional[Literal["image", "video", "text"]] = None, platforms: Optional[List[Literal["instagram", "tiktok", "thread"]]] = None, notes: Optional[str] = None, caption: Optional[str] = None, asset_filenames: Optional[List[str]] = None):
+    def edit_calendar_entry(date: str, id: str, runtime: ToolRuntime[None, ContentPlanningState], idea: Optional[str] = None, content_type: Optional[Literal["image", "video", "text"]] = None, platforms: Optional[List[Literal["instagram", "thread"]]] = None, notes: Optional[str] = None, caption: Optional[str] = None, asset_filenames: Optional[List[str]] = None):
         "Update one or more fields of an existing CALENDAR.json entry, identified by its date and id. Only the fields you pass are changed."
         influencer_name = runtime.state.get("influencer_name")
         calendar_path = f"src/influencers/{influencer_name}/CALENDAR.json"

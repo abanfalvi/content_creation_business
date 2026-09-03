@@ -35,3 +35,6 @@ ORCHESTRATOR="upstage/solar-pro4"
 
 # Skill Converter
 SKILL_CONVERTER_MODEL="upstage/solar-pro4"
+
+# Input Guard Model (via Mistral)
+PROMPT_GUARD="mistral-moderation-2603"

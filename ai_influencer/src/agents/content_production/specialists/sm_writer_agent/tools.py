@@ -1,5 +1,7 @@
 from langgraph.types import Command
-from langchain_core.messages import ToolMessage, HumanMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langchain_core.messages import ToolMessage, HumanMessage, AIMessage, RemoveMessage
+from langchain_core.messages.utils import get_buffer_string
 from langchain.tools import tool, ToolRuntime
 from langchain_openrouter import ChatOpenRouter
 
@@ -41,6 +43,76 @@ class CharacterFeatures(BaseModel):
     negative_constraints: List[str] = Field(
         description="Things that must never appear in generated visuals (e.g. no tattoos, no freckles, no heavy makeup) — usable as negative-prompt guidance."
     )
+
+_KEEP_RECENT_MESSAGES = 12
+"""How many of the most recent messages `compress_context` always leaves untouched."""
+
+_MIN_HISTORY_TO_COMPRESS = 6
+"""Below this many older messages, compression isn't worth the summarization call."""
+
+_compression_model = ChatOpenRouter(model="inclusionai/ling-3.0-flash", temperature=0.2)
+
+_COMPRESSION_PROMPT = """You are compressing the working conversation history of a social-media content writer agent, so it can keep going without losing track of what's already been decided or produced.
+
+Read the conversation below and extract only what's needed to continue the work coherently. Structure your output with these sections, writing "None" where a section has nothing to report:
+
+## POST BRIEF & INTENT
+What post is being created and for whom (goal, angle, format).
+
+## PERSONA DETAILS ESTABLISHED
+Any persona-specific facts, traits, or phrasing already looked up or decided (from CHARACTER.md / PERSONALITY.md / BACKSTORY.md) that must not be re-derived or contradicted.
+
+## MEDIA GENERATED SO FAR
+Every image/video/audio asset created or edited: filename, what it shows, and whether it's been accepted or needs rework.
+
+## CAPTION STATUS
+The current caption draft or what's been recorded to CAPTION.md, if any.
+
+## GUARDRAIL FEEDBACK
+Any specific issue a guardrail (safety, consistency) flagged that still needs addressing, quoted or closely paraphrased.
+
+## NEXT STEPS
+What remains to finish this post.
+
+Respond ONLY with the filled-in sections above — no preamble, no text before or after.
+
+Conversation to compress:
+{messages}"""
+
+
+def _find_safe_cutoff_point(messages: list, cutoff_index: int) -> int:
+    "Nudge a cutoff index so it never splits an AIMessage's tool_calls from their ToolMessage replies."
+    if cutoff_index >= len(messages) or not isinstance(messages[cutoff_index], ToolMessage):
+        return cutoff_index
+
+    tool_call_ids = set()
+    idx = cutoff_index
+    while idx < len(messages) and isinstance(messages[idx], ToolMessage):
+        if messages[idx].tool_call_id:
+            tool_call_ids.add(messages[idx].tool_call_id)
+        idx += 1
+
+    for i in range(cutoff_index - 1, -1, -1):
+        msg = messages[i]
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            ai_call_ids = {tc.get("id") for tc in msg.tool_calls if tc.get("id")}
+            if tool_call_ids & ai_call_ids:
+                return i
+
+    return idx
+
+
+def _find_safe_cutoff(messages: list, keep: int) -> int:
+    if len(messages) <= keep:
+        return 0
+    return _find_safe_cutoff_point(messages, len(messages) - keep)
+
+
+def _summarize_messages(messages_to_summarize: list) -> str:
+    formatted = get_buffer_string(messages_to_summarize)
+    response = _compression_model.invoke(_COMPRESSION_PROMPT.format(messages=formatted))
+    return response.content if isinstance(response.content, str) else str(response.content)
+
 
 class AgentTools:
 
@@ -322,6 +394,44 @@ class AgentTools:
         )
 
         return persona
+
+    @tool
+    def compress_context(runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
+        "Compress your own conversation history when it's grown overwhelming: too many piled-up generated images/videos/audio, several rounds of guardrail back-and-forth, or you're struggling to find the relevant detail buried earlier in the thread. Condenses everything older into a structured summary (post brief, persona details already established, media generated, caption status, open guardrail feedback, next steps) and keeps only the most recent messages intact. Call it yourself, on your own judgment — there's no fixed schedule for it. Takes no arguments."
+        messages = list(runtime.state.get("messages", []))
+
+        if len(messages) < 2:
+            return Command(update={"messages": [ToolMessage(content="Conversation is too short to compress.", tool_call_id=runtime.tool_call_id)]})
+
+        current_call, history = messages[-1], messages[:-1]
+
+        if len(history) < _MIN_HISTORY_TO_COMPRESS:
+            return Command(update={"messages": [ToolMessage(content="Not enough conversation history yet to make compression worthwhile.", tool_call_id=runtime.tool_call_id)]})
+
+        cutoff_index = _find_safe_cutoff(history, _KEEP_RECENT_MESSAGES)
+        to_summarize, preserved = history[:cutoff_index], history[cutoff_index:]
+
+        if not to_summarize:
+            return Command(update={"messages": [ToolMessage(content="Nothing old enough to compress yet — recent history is already within the retained window.", tool_call_id=runtime.tool_call_id)]})
+
+        summary = _summarize_messages(to_summarize)
+        summary_message = HumanMessage(
+            content=f"Here is a summary of the conversation so far, replacing the earlier messages that were compressed:\n\n{summary}",
+            additional_kwargs={"lc_source": "summarization"},
+        )
+
+        return Command(update={
+            "messages": [
+                RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                summary_message,
+                *preserved,
+                current_call,
+                ToolMessage(
+                    content=f"Context compressed: {len(to_summarize)} older message(s) condensed into the summary above; {len(preserved)} recent message(s) kept intact.",
+                    tool_call_id=runtime.tool_call_id,
+                ),
+            ]
+        })
 
     @tool
     def load_available_skills() -> List[dict] | str:

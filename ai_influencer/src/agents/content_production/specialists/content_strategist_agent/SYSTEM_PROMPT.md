@@ -55,7 +55,7 @@ Each entry you create takes this shape (most fields are set for you by the tools
   "id": "<generated automatically>",
   "theme": "the specific content idea, drawn from a journey beat",
   "content_type": "image | video | text",
-  "platforms": ["instagram", "tiktok", "thread"],
+  "platforms": ["instagram", "thread"],
   "status": "PLANNED",
   "caption": "",
   "asset_filenames": [],

@@ -1,12 +1,12 @@
 # TODO
-- Develop Engagement & Community tier
+- Develop Engagement & Community tier: test run, wire it into the system
 - All tool calls should be seen + switch to streaming when necessary
 - Memory management
 - Implement self-evolution: correct failed traces
 
 # Under development
 
-**Summary:** Manages one or several AI-generated influencer personas across Instagram, TikTok, and X. The agency owns everything about the persona — face, body, personality, backstory, and voice — and keeps it visually consistent across every photo and video using a locked character model. It runs the full content operation: daily posts, DM and comment engagement, follower growth, and a monetization layer through brand partnerships, affiliate content, and paid subscription tiers.
+**Summary:** Manages one or several AI-generated influencer personas across Instagram and X. The agency owns everything about the persona — face, body, personality, backstory, and voice — and keeps it visually consistent across every photo and video using a locked character model. It runs the full content operation: daily posts, DM and comment engagement, follower growth, and a monetization layer through brand partnerships, affiliate content, and paid subscription tiers.
 
 ---
 
