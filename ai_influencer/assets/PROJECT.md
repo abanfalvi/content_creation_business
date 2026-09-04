@@ -1,6 +1,5 @@
 # TODO
 - Develop Engagement & Community tier: test run, wire it into the system
-- All tool calls should be seen + switch to streaming when necessary
 - Memory management
 - Implement self-evolution: correct failed traces
 

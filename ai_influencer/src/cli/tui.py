@@ -343,6 +343,12 @@ class ChatScreen(Screen):
         await log.mount(widget)
         self._schedule_scroll_to_end()
 
+    async def _mount_graph_node_call(self, node_name: str) -> None:
+        widget = Static(f"[dim]🔧 {node_name} is currently working...[/dim]", classes="bubble tool-call")
+        log = self.query_one("#log", Vertical)
+        await log.mount(widget)
+        self._schedule_scroll_to_end()
+
     @on(Input.Changed, "#chat-input")
     def _on_input_changed(self, event: Input.Changed) -> None:
         if self._menu_mode != "commands":
@@ -481,14 +487,19 @@ class ChatScreen(Screen):
                 agent = await _get_orchestrator()
                 async with atrack_tokens(agent, self.thread_id) as usage:
                     seen = 0
-                    async for state in agent.astream({"messages": [("user", prompt)]}, config=config, stream_mode="values"):
-                        outcome = state
-                        messages = state.get("messages", [])
-                        for message in messages[seen:]:
-                            if getattr(message, "tool_calls", None):
-                                for call in message.tool_calls:
-                                    await self._mount_tool_call(call)
-                        seen = len(messages)
+                    async for mode, data in agent.astream({"messages": [("user", prompt)]}, config=config, stream_mode=["values", "custom"]):
+                        if mode == "values":
+                            outcome = data
+                            messages = data.get("messages", [])
+                            for message in messages[seen:]:
+                                if getattr(message, "tool_calls", None):
+                                    for call in message.tool_calls:
+                                        await self._mount_tool_call(call)
+                            seen = len(messages)
+                        elif mode == "custom":
+                            node_name = data.get("step")
+                            node_name = node_name.removeprefix("call_") 
+                            await self._mount_graph_node_call(node_name)
                 if not outcome:
                     raise RuntimeError("The orchestrator finished without returning a response.")
                 reply = _content_to_text(outcome["messages"][-1].content).strip()

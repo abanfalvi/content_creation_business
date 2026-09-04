@@ -25,9 +25,5 @@ class PersonaWorkflowState(TypedDict):
     feedback: Optional[str]
     lessons_learned: Dict[str, str]
 
-class AudioEngineerState(AgentState):
-    active_step: NotRequired[Literal["edit_audio", "score_final_result"]]
-    rubric_scores: RubricScores
-
 class LLExtractorState(AgentState):
     active_step: NotRequired[Literal["save_learnable_traces"]]

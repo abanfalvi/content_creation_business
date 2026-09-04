@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
 from langchain_openrouter import ChatOpenRouter
+from langgraph.config import get_stream_writer
 
 from langgraph.types import interrupt
 
@@ -49,6 +50,7 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
             },
             config={"configurable": {"thread_id": thread_id}},
         )
+
         return backstory_result["messages"][-1].content
     elif agent == "personality_agent":
         personality_result = personality_agent.invoke(
@@ -97,6 +99,8 @@ def gen_image_node(state: PersonaWorkflowState) -> dict:
     return {}
 
 def call_character_design_agent_node(state: PersonaWorkflowState, *, config: RunnableConfig) -> dict:
+    get_stream_writer()({"step": "call_character_design_agent"})
+
     thread_id = f"{config['configurable']['thread_id']}:character_design_agent"
     prompt = state.get("prompt") or "Create the character design of the next influencer"
     human_feedback = state.get("feedback")
@@ -107,6 +111,8 @@ def call_character_design_agent_node(state: PersonaWorkflowState, *, config: Run
     return {"influencer_name": influencer_name, "character": character_description}
 
 def call_personality_agent_node(state: PersonaWorkflowState, *, config: RunnableConfig) -> dict:
+    get_stream_writer()({"step": "call_personality_agent"})
+
     thread_id = f"{config['configurable']['thread_id']}:personality_agent"
     prompt = "Create the personality of the next influencer"
     human_feedback = state.get("feedback")
@@ -116,6 +122,8 @@ def call_personality_agent_node(state: PersonaWorkflowState, *, config: Runnable
     return {"personality": personality_description, "voice_name": voice_name}
 
 def call_backstory_agent_node(state: PersonaWorkflowState, *, config: RunnableConfig) -> dict:
+    get_stream_writer()({"step": "call_backstory_agent"})
+
     thread_id = f"{config['configurable']['thread_id']}:backstory_agent"
     prompt = "Create the backstory of the next influencer"
     human_feedback = state.get("feedback")

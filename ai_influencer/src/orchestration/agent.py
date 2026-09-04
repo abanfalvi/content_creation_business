@@ -28,7 +28,8 @@ with open(r"src\orchestration\SYSTEM_PROMPT.md", "r") as f:
 
 all_tools = [
     AgentTools.call_content_production_manager,
-    AgentTools.run_persona_creation_workflow
+    AgentTools.run_persona_creation_workflow,
+    AgentTools.submit_persona_review
 ]
 
 async def build_orchestrator():

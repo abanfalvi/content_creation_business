@@ -7,7 +7,7 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware import TodoListMiddleware, ToolCallLimitMiddleware
 
 from .....models import SM_CONTENT_WRITER_AGENT
 from .tools import AgentTools
@@ -52,6 +52,7 @@ sm_content_writer_agent = create_agent(
         safe_output_guardrail,
         consistency_check_guardrail,
         check_caption_consistency,
+        ToolCallLimitMiddleware(tool_name="generate_video", run_limit=2)
     ],
     state_schema=ContentCreatorState,
     checkpointer=checkpointer,

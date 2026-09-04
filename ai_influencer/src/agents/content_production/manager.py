@@ -17,6 +17,7 @@ from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState
 from typing_extensions import NotRequired
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langgraph.config import get_stream_writer
 
 from ...models import CONTENT_PRODUCTION_MANAGER
 from .specialists.content_strategist_agent.agent import content_strategist_agent
@@ -50,6 +51,7 @@ class ManagerTools:
     @tool
     def call_content_strategist_agent(prompt: HandOffContract, runtime: ToolRuntime[None, ManagerState]) -> str:
         "Delegate to the Content Strategist Agent to plan, review, or update the influencer's content calendar (CALENDAR.json). `prompt` must state the concrete planning task (e.g. the window to plan, or the entry to revise), not a generic instruction."
+        runtime.stream_writer({"step": "call_content_strategist_agent"})
         thread_id = runtime.config["configurable"]["thread_id"]
         result = content_strategist_agent.invoke(
             {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name")},
@@ -60,6 +62,7 @@ class ManagerTools:
     @tool
     def call_sm_content_writer_agent(prompt: HandOffContract, runtime: ToolRuntime[None, ManagerState]) -> Command:
         "Delegate to the Social Media Content Writer Agent to produce one piece of content (image/video + caption). `prompt` must name the specific calendar entry or idea to execute, not a generic instruction."
+        runtime.stream_writer({"step": "call_sm_content_writer_agent"})
         thread_id = runtime.config["configurable"]["thread_id"]
         result = sm_content_writer_agent.invoke(
             {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name"), "voice_name": runtime.state.get("voice_name")},
@@ -124,6 +127,7 @@ class ManagerTools:
     @tool
     def call_auditor(runtime: ToolRuntime[None, ManagerState]):
         "Call the auditor to analyse the traces took by the specialists agents"
+        runtime.stream_writer({"step": "call_auditor"})
         all_traces = {}
         for (name, agent) in [
             ("content_strategist_agent", content_strategist_agent),
