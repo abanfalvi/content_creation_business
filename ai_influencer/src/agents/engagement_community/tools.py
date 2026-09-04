@@ -13,6 +13,7 @@ import threading
 from pydantic import BaseModel, Field 
 
 from .state import EngagementState
+from .guardrails import _passes_moderation
 
 load_dotenv()
 
@@ -54,7 +55,7 @@ class AgentTools:
 
     @tool
     def get_comments(media_id: str, platform: Literal["instagram", "threads"], runtime: ToolRuntime[None, EngagementState]) -> str:
-        "Fetch all top-level comments (and their ids, text, timestamp) on the given post. Returns JSON. Cross-reference against already-replied comment ids before answering."
+        "Fetch all top-level comments (and their ids, text, timestamp) on the given post. Comments that fail moderation are filtered out before being returned, so anything you see here is already safe to read and reply to. Returns JSON. Cross-reference against already-replied comment ids before answering."
         influencer_name = runtime.state.get("influencer_name")
         token, _ = _get_meta_credentials(influencer_name, platform)
         base = "https://graph.threads.com/v1.0" if platform == "threads" else "https://graph.instagram.com/v25.0"
@@ -62,7 +63,10 @@ class AgentTools:
         resp = httpx.get(endpoint, params={"fields": "id,text,timestamp", "access_token": token})
         if resp.is_error or "error" in resp.json():
             raise RuntimeError(f"Failed to fetch comments for {media_id}: {resp.text}")
-        return json.dumps(resp.json().get("data", []))
+
+        comments = resp.json().get("data", [])
+        safe_comments = [c for c in comments if _passes_moderation(c.get("text", ""))]
+        return json.dumps(safe_comments)
 
     @tool
     def reply_to_comment(comment_id: str, message: str, platform: Literal["instagram", "threads"], runtime: ToolRuntime[None, EngagementState]) -> Command:

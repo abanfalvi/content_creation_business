@@ -13,7 +13,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from ...models import REPLY_AGENT
 from .tools import AgentTools
 from .state import EngagementState
-from .guardrails import moderate_reply, input_guard
+from .guardrails import moderate_reply
 from .utils import checkpointer
 from ...memory_store import shared_memory_store
 
@@ -60,8 +60,7 @@ response_handling_agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[
         moderate_reply,
-        input_guard,
-        ToolCallLimitMiddleware(tool_name="reply_to_comment", thread_limit=5),
+        ToolCallLimitMiddleware(tool_name="reply_to_comment", run_limit=5),
         extend_system_prompt_config
     ],
     state_schema=EngagementState,

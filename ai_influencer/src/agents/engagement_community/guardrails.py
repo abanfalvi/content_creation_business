@@ -1,15 +1,10 @@
-from typing import Any, Callable
+from typing import Callable
 from mistralai import Mistral
 import os
 
 from langchain.agents.middleware.types import ToolCallRequest, ModelResponse
-from langchain.agents.middleware import wrap_tool_call, before_model
+from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
-from langgraph.runtime import Runtime
-from langgraph.types import Command
-from langchain_huggingface import HuggingFaceEndpoint
-
-from .state import EngagementState
 
 from ...models import PROMPT_GUARD
 
@@ -26,31 +21,14 @@ def moderate_reply(
     request: ToolCallRequest,
     handler: Callable[[ToolCallRequest], ModelResponse],
 ) -> ModelResponse:
-    """Configure agent behavior based on the current step."""
+    "Block a reply_to_comment call before it posts, if the drafted reply fails moderation."
     if request.tool_call["name"] != "reply_to_comment":
         return handler(request)
 
-    message = request.tool_call["args"]["messages"]
+    message = request.tool_call["args"]["message"]
     if not _passes_moderation(message):
         return ToolMessage(
             content="Reply was blocked by moderation and not posted.",
             tool_call_id=request.tool_call["id"],
         )
     return handler(request)
-
-@before_model
-def input_guard(state: EngagementState, runtime: Runtime):
-    last = state["messages"][-1]
-    if not isinstance(last, ToolMessage):
-        return None
-    
-    tool_name = last.name
-    if tool_name != "reply_to_comment":
-        return None
-    
-    tool_output = last.content
-    if _passes_moderation(tool_output):
-        return None
-    return Command(update={
-        "messages":[ToolMessage(content="The input content has been flagged as dangerous, hence could not be provided. Answer to a differnt comment", tool_call_id=state["messages"][-1].tool_call_id)]
-    })
