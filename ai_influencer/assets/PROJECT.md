@@ -3,7 +3,6 @@
 - Memory management
 - Implement self-evolution: correct failed traces
 - Improve token counter
-- Have cron jobs
 
 # Under development
 
