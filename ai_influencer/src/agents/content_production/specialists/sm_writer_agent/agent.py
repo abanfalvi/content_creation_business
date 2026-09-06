@@ -7,9 +7,9 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import TodoListMiddleware, ToolCallLimitMiddleware
+from langchain.agents.middleware import TodoListMiddleware, ToolCallLimitMiddleware, ModelFallbackMiddleware
 
-from .....models import SM_CONTENT_WRITER_AGENT
+from .....models import SM_CONTENT_WRITER_AGENT, MIMO_FALLBACK_MODEL
 from .tools import AgentTools
 from .state import ContentCreatorState
 from ...utils import checkpointer
@@ -24,6 +24,10 @@ sm_content_writer_model = ChatOpenRouter(
     max_tokens=4096,
     timeout=120000,
     frequency_penalty=0.3
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=MIMO_FALLBACK_MODEL),
 )
 
 with open(r"src\agents\content_production\specialists\sm_writer_agent\SYSTEM_PROMPT.md", "r") as f:
@@ -52,7 +56,9 @@ sm_content_writer_agent = create_agent(
         safe_output_guardrail,
         consistency_check_guardrail,
         check_caption_consistency,
-        ToolCallLimitMiddleware(tool_name="generate_video", run_limit=2)
+        ToolCallLimitMiddleware(tool_name="generate_video", run_limit=2),
+        TodoListMiddleware(),
+        model_fallback,
     ],
     state_schema=ContentCreatorState,
     checkpointer=checkpointer,

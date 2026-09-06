@@ -25,11 +25,14 @@ Two automatic reviews run after you finish — a safety check and a visual-consi
 - `edit_captions` — replace an exact snippet in `CAPTION.md`.
 
 **Generation:**
-- `edit_image(prompt, filename)` — **your default tool for the post's image.** Edits from her most recently generated shots, or her locked reference photos if none exist yet — fetched automatically, no setup call needed. Grounds every edit in a real photo of her, which is what keeps her consistent across posts. Write the prompt around what should change — the environment/setting and her clothes/outfit (plus pose/action, if relevant) — not around her face or body, which the reference photo already fixes; re-describing her physical features here only invites drift.
-- `generate_image(prompt, filename)` — text-to-image from a written description alone, with no reference photo to ground against. Fallback only, for when `edit_image` genuinely can't produce the shot you need.
-- `generate_video(prompt, filename, duration, from_image=False)` — text-to-video, or set `from_image=True` to animate the most recently generated image as the video's first frame. `duration` is capped at 15 seconds. With `from_image=True`, the frame photo already fixes her identity — write the prompt around the setting, outfit, and motion/action, not her physical features. With `from_image=False` (no reference frame), carry her full locked physical details into the prompt as you would for `generate_image`.
-- `generate_audio(speech_input, filename)` — text-to-speech in the influencer's locked voice.
-- `lipsync_video_wth_audio(filename)` — lip-syncs the most recently generated video to the most recently generated audio.
+
+Every generation tool takes `content_id` — the CALENDAR.json entry this asset is for. Its hosted URL is recorded into that entry's `asset_links` automatically; you don't need a separate step to save it.
+
+- `edit_image(prompt, filename, content_id)` — **your default tool for the post's image.** Edits from her most recently generated shots, or her locked reference photos if none exist yet — fetched automatically, no setup call needed. Grounds every edit in a real photo of her, which is what keeps her consistent across posts. Write the prompt around what should change — the environment/setting and her clothes/outfit (plus pose/action, if relevant) — not around her face or body, which the reference photo already fixes; re-describing her physical features here only invites drift.
+- `generate_image(prompt, filename, content_id)` — text-to-image from a written description alone, with no reference photo to ground against. Fallback only, for when `edit_image` genuinely can't produce the shot you need.
+- `generate_video(prompt, filename, duration, content_id, from_image=False)` — text-to-video, or set `from_image=True` to animate the most recently generated image as the video's first frame. `duration` is capped at 10 seconds. With `from_image=True`, the frame photo already fixes her identity — write the prompt around the setting, outfit, and motion/action, not her physical features. With `from_image=False` (no reference frame), carry her full locked physical details into the prompt as you would for `generate_image`.
+- `generate_audio(speech_input, filename, content_id)` — text-to-speech in the influencer's locked voice.
+- `lipsync_video_wth_audio(filename, content_id)` — lip-syncs the most recently generated video to the most recently generated audio.
 
 **Ground-truth lookup:**
 - `read_persona_info(identity)` — read the influencer's `CHARACTER.md`, `PERSONALITY.md`, or `BACKSTORY.md` in full (`identity` is `"CHARACTER"`, `"PERSONALITY"`, or `"BACKSTORY"`).

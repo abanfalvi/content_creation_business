@@ -1,12 +1,42 @@
 import frontmatter, os, json
-from typing import List, Literal
+from typing import Any, List, Literal
 from pathlib import Path
+from json import JSONDecodeError
 import sqlite3
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.runtime import Runtime
 
+from langchain.agents.middleware import after_agent
+from langchain.agents.middleware.types import ToolCallRequest
+from langchain.messages import HumanMessage
+
+from langchain.agents import AgentState
 
 conn = sqlite3.connect("./checkpoints/persona_identity.db", check_same_thread=False)
 checkpointer = SqliteSaver(conn)
+
+def on_tool_error(exc: Exception, request: ToolCallRequest) -> str | None:
+    if isinstance(exc, JSONDecodeError):
+        return f"`{request.tool_call['name']}` failed; fix the input and retry. Following error returned: {exc}"
+    return None
+
+@after_agent(can_jump_to=["model"])
+def verify_artifact(state: AgentState, runtime: Runtime) -> None | dict[str, Any]:
+    influencer_name = state.get("influencer_name")
+    artifact = state.get("artifact")
+    with open(f"src/influencers/{influencer_name}/{artifact}.md", "r", encoding="utf-8") as f:
+        data = f.read()
+    if data:
+        return None
+    return {
+        "jump_to": "model",
+        "messages": [
+            HumanMessage(content=(
+                f"No artifact has been created for the {artifact} of this influencer {influencer_name}."
+                "Make sure to create it before returning"
+            ))
+        ],
+    }
 
 class FileEditingTools:
 

@@ -14,13 +14,14 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Input, Markdown, OptionList, Static
+from textual.screen import Screen
+from textual.widgets import Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 
 from src.cli.state import (
     DEFAULT_SESSION,
     all_sessions,
+    delete_session,
     get_default_influencer,
     new_auto_session,
     new_thread_id,
@@ -97,7 +98,7 @@ def _info_panel_text() -> str:
         "[bold]Departments[/bold]",
         "🎭 Persona & Identity      [green]online[/green]",
         "🎬 Content Production     [green]online[/green]",
-        "💬 Engagement & Community [dim]not wired up yet[/dim]",
+        "💬 Engagement & Community [green]online[/green]",
         "💸 Monetization           [dim]not wired up yet[/dim]",
         "",
         "[bold]Influencers[/bold]",
@@ -117,51 +118,9 @@ def _info_panel_text() -> str:
     lines.append("")
     count = len(influencers)
     lines.append(
-        f"[dim]{count} influencer{'s' if count != 1 else ''} · 2 departments online · type / for sessions[/dim]"
+        f"[dim]{count} influencer{'s' if count != 1 else ''} · 3 departments online · type / for sessions[/dim]"
     )
     return "\n".join(lines)
-
-
-class SessionSwitcher(ModalScreen[tuple[str, str] | None]):
-    """Lists known sessions and lets you jump to one, or type a new name to
-    start (or resume) a differently named session."""
-
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def __init__(self, current_session: str) -> None:
-        super().__init__()
-        self.current_session = current_session
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="switcher"):
-            yield Static("[bold]Sessions[/bold]", id="switcher-title")
-            with VerticalScroll(id="switcher-list"):
-                sessions = all_sessions()
-                if sessions:
-                    for name in sorted(sessions):
-                        label = f"{name} (current)" if name == self.current_session else name
-                        yield Button(label, id=f"session-{name}", classes="session-item")
-                else:
-                    yield Static("[dim]No sessions yet.[/dim]")
-            yield Input(placeholder="Type a name to switch/start a session...", id="new-session-input")
-
-    def on_mount(self) -> None:
-        self.query_one("#new-session-input", Input).focus()
-
-    @on(Button.Pressed, ".session-item")
-    def _pick(self, event: Button.Pressed) -> None:
-        name = event.button.id.removeprefix("session-")
-        self.dismiss((name, resolve_thread_id(name)))
-
-    @on(Input.Submitted, "#new-session-input")
-    def _create(self, event: Input.Submitted) -> None:
-        name = event.value.strip()
-        if not name:
-            return
-        self.dismiss((name, resolve_thread_id(name)))
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
 
 class ChatScreen(Screen):
@@ -185,9 +144,11 @@ class ChatScreen(Screen):
         super().__init__()
         self.thread_id = thread_id
         self.session = session
-        self._menu_mode = "commands"  # "commands" | "select_influencer"
+        self._menu_mode = "commands"  # "commands" | "select_influencer" | "select_session"
         self._spinner_frame = 0
         self._spinner_timer = None
+        self._delete_confirm_session: str | None = None
+        self._suppress_input_changed = False
 
     def compose(self) -> ComposeResult:
         # Banner, info panel, and the message log all share one scrollable
@@ -350,10 +311,18 @@ class ChatScreen(Screen):
         self._schedule_scroll_to_end()
 
     @on(Input.Changed, "#chat-input")
-    def _on_input_changed(self, event: Input.Changed) -> None:
-        if self._menu_mode != "commands":
+    async def _on_input_changed(self, event: Input.Changed) -> None:
+        if self._suppress_input_changed:
+            self._suppress_input_changed = False
             return
-        self._update_command_menu(event.value)
+        if self._menu_mode == "commands":
+            self._update_command_menu(event.value)
+        elif self._menu_mode == "select_session":
+            if event.value == "d":
+                await self._handle_delete_keystroke()
+            else:
+                self._delete_confirm_session = None
+                self._update_session_menu(event.value)
 
     def _update_command_menu(self, value: str) -> None:
         menu = self.query_one("#command-menu", OptionList)
@@ -385,6 +354,7 @@ class ChatScreen(Screen):
         if menu.display:
             menu.display = False
         self._menu_mode = "commands"
+        self._delete_confirm_session = None
 
     @on(OptionList.OptionSelected, "#command-menu")
     async def _on_command_selected(self, event: OptionList.OptionSelected) -> None:
@@ -399,12 +369,24 @@ class ChatScreen(Screen):
         elif mode == "select_influencer":
             self._menu_mode = "commands"
             await self._set_active_influencer(option_id)
+        elif mode == "select_session":
+            if option_id is not None and option_id == self._delete_confirm_session:
+                # Clicking the "Do you want to delete this session?" row
+                # confirms the deletion instead of switching to it.
+                self._delete_confirm_session = None
+                await self._delete_session_and_refresh(option_id)
+                # _delete_session_and_refresh already redraws the menu via
+                # _update_session_menu — its display state (shown/hidden)
+                # reflects whether any sessions remain, so it's left as-is.
+            else:
+                self._menu_mode = "commands"
+                await self._switch_session(option_id)
 
         input_widget.focus()
 
     async def _run_command(self, name: str | None) -> None:
         if name == "/sessions":
-            self.app.push_screen(SessionSwitcher(self.session), self._on_switch_result)
+            await self._open_session_menu()
         elif name == "/new":
             self.action_new_conversation()
         elif name == "/quit":
@@ -444,11 +426,91 @@ class ChatScreen(Screen):
         self.influencer_name = slug
         await self._mount_message(f"Now managing **{slug.replace('_', ' ').title()}** in this session.", "system")
 
-    def _on_switch_result(self, result: tuple[str, str] | None) -> None:
-        self.query_one("#chat-input", Input).focus()
-        if result is None:
+    async def _open_session_menu(self) -> None:
+        """Repopulate the same popup used for slash-commands and the
+        influencer picker with the session list instead, and switch its mode
+        so the next selection is interpreted as a session pick. Typing a name
+        that matches no existing session falls through to starting a new one
+        (see _update_session_menu/_on_submit) instead of picking from the list."""
+        self._menu_mode = "select_session"
+        self._delete_confirm_session = None
+        self._update_session_menu("")
+
+    def _update_session_menu(self, value: str) -> None:
+        menu = self.query_one("#command-menu", OptionList)
+        sessions = sorted(all_sessions())
+        matches = [s for s in sessions if s.lower().startswith(value.lower())] if value else sessions
+        menu.clear_options()
+        if not matches:
+            # No existing session matches what's typed — hide the menu so
+            # submitting the input starts a brand-new session with that name.
+            menu.display = False
             return
-        name, thread_id = result
+        for name in matches:
+            if name == self._delete_confirm_session:
+                prompt = Text("Do you want to delete this session?", style="bold red")
+            else:
+                prompt = Text()
+                marker = "★ " if name == self.session else "  "
+                prompt.append(f"{marker}{name}", style="bold")
+                if name == self.session:
+                    prompt.append("  (current)", style="dim")
+            menu.add_option(Option(prompt, id=name))
+        # Keep the row awaiting delete confirmation highlighted (rather than
+        # resetting to the top) so the confirmation text stays visibly tied
+        # to the item the second "d" will act on.
+        menu.highlighted = matches.index(self._delete_confirm_session) if self._delete_confirm_session in matches else 0
+        menu.display = True
+
+    async def _handle_delete_keystroke(self) -> None:
+        """Called when the session menu's filter box receives a lone "d" —
+        the first press marks the highlighted session for deletion (swapping
+        its displayed name for a confirmation prompt); a second "d" while
+        that same confirmation is showing actually deletes it. Any other
+        keystroke in between cancels it (see _on_input_changed)."""
+        menu = self.query_one("#command-menu", OptionList)
+        if self._delete_confirm_session is not None:
+            name = self._delete_confirm_session
+            self._delete_confirm_session = None
+            self._set_input_value_silently("")
+            await self._delete_session_and_refresh(name)
+            return
+        if menu.option_count == 0 or menu.highlighted is None:
+            self._set_input_value_silently("")
+            return
+        option = menu.get_option_at_index(menu.highlighted)
+        self._delete_confirm_session = option.id
+        self._set_input_value_silently("")
+        self._update_session_menu("")
+
+    def _set_input_value_silently(self, value: str) -> None:
+        """Set the chat input's value without re-triggering
+        _on_input_changed — used when the delete-confirmation flow clears
+        the "d" it just consumed, so that clearing doesn't itself get read
+        as a new keystroke that cancels the confirmation."""
+        self._suppress_input_changed = True
+        self.query_one("#chat-input", Input).value = value
+
+    async def _delete_session_and_refresh(self, name: str) -> None:
+        delete_session(name)
+        if name == self.session:
+            # load_history() clears and rebuilds the whole log — mounting a
+            # confirmation message here would race with that clear, so the
+            # fresh (empty) session view stands in for the confirmation.
+            self.session, self.thread_id = new_auto_session()
+            self.influencer_name = None
+            self.session_tokens_in = 0
+            self.session_tokens_out = 0
+            self.load_history()
+        else:
+            await self._mount_message(f"Deleted session **{name}**.", "system")
+        self._update_session_menu("")
+
+    async def _switch_session(self, name: str) -> None:
+        name = name.strip()
+        if not name:
+            return
+        thread_id = resolve_thread_id(name)
         if name == self.session and thread_id == self.thread_id:
             return
         self.session = name
@@ -462,6 +524,12 @@ class ChatScreen(Screen):
     async def _on_submit(self, event: Input.Submitted) -> None:
         menu = self.query_one("#command-menu", OptionList)
         if menu.display:
+            if self._delete_confirm_session is not None:
+                # Enter cancels a pending delete confirmation instead of
+                # switching to the session shown behind the prompt text.
+                self._delete_confirm_session = None
+                self._update_session_menu("")
+                return
             menu.action_select()
             return
 
@@ -470,6 +538,12 @@ class ChatScreen(Screen):
             return
         input_widget = self.query_one("#chat-input", Input)
         input_widget.value = ""
+
+        if self._menu_mode == "select_session":
+            self._menu_mode = "commands"
+            await self._switch_session(text)
+            return
+
         input_widget.disabled = True
         await self._mount_message(text, "user")
         self.send_message(text)
@@ -485,8 +559,9 @@ class ChatScreen(Screen):
         try:
             try:
                 agent = await _get_orchestrator()
+                snapshot = await agent.aget_state(config)
+                seen = len(snapshot.values.get("messages", [])) if snapshot.values else 0
                 async with atrack_tokens(agent, self.thread_id) as usage:
-                    seen = 0
                     async for mode, data in agent.astream({"messages": [("user", prompt)]}, config=config, stream_mode=["values", "custom"]):
                         if mode == "values":
                             outcome = data
@@ -630,34 +705,6 @@ class AgencyApp(App):
     #chat-input {
         margin: 0 2 1 2;
     }
-
-    SessionSwitcher {
-        align: center middle;
-    }
-
-    #switcher {
-        width: 60;
-        height: auto;
-        max-height: 80%;
-        border: heavy $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #switcher-title {
-        margin-bottom: 1;
-    }
-
-    #switcher-list {
-        height: auto;
-        max-height: 15;
-        margin-bottom: 1;
-    }
-
-    .session-item {
-        width: 100%;
-        margin-bottom: 1;
-    }
     """
 
     def on_mount(self) -> None:
@@ -667,6 +714,20 @@ class AgencyApp(App):
 
 def run() -> None:
     AgencyApp().run()
+    asyncio.run(_close_agent_checkpointers())
+
+
+async def _close_agent_checkpointers() -> None:
+    """Textual's own resources are torn down by the time .run() returns, but
+    the orchestrator and content-production agents each hold an aiosqlite
+    connection whose background thread is non-daemon — left open, it keeps
+    the interpreter alive after quitting, so the terminal never gets its
+    prompt back (see close_checkpointer in each module's utils.py)."""
+    from src.orchestration.utils import close_checkpointer as close_orchestrator_checkpointer
+    from src.agents.content_production.utils import close_checkpointer as close_content_production_checkpointer
+
+    await close_orchestrator_checkpointer()
+    await close_content_production_checkpointer()
 
 
 if __name__ == "__main__":

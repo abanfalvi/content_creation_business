@@ -1,5 +1,5 @@
 from typing import Callable
-from mistralai import Mistral
+from mistralai.client import Mistral
 import os
 
 from langchain.agents.middleware.types import ToolCallRequest, ModelResponse

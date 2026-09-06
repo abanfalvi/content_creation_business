@@ -11,17 +11,17 @@ app = typer.Typer(help="CLI for the AI influencer agency. Run with no arguments 
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from src.cli.tui import AgencyApp
+        from src.cli.tui import run as run_chat
 
-        AgencyApp().run()
+        run_chat()
 
 
 @app.command("chat")
 def chat() -> None:
     """Open the interactive TUI (same as running with no arguments)."""
-    from src.cli.tui import AgencyApp
+    from src.cli.tui import run as run_chat
 
-    AgencyApp().run()
+    run_chat()
 
 
 @app.command("sessions")

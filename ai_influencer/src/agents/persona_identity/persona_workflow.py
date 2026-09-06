@@ -22,7 +22,7 @@ from .specialists.character_design_agent.agent import character_design_agent
 from .specialists.personality_agent.agent import personality_agent
 from .utils import checkpointer
 from .workflow_state import PersonaWorkflowState
-from ...models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL
+from ...models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 from ...auditor.tools import AgentTools
 from ...auditor.agent import auditor_agent
 from ...memory_store import shared_memory_store
@@ -46,7 +46,8 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
         backstory_result = backstory_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
-                "influencer_name": influencer_name
+                "influencer_name": influencer_name,
+                "artifact": "BACKSTORY"
             },
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -56,7 +57,8 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
         personality_result = personality_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
-                "influencer_name": influencer_name
+                "influencer_name": influencer_name,
+                "artifact": "PERSONALITY"
             },
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -65,6 +67,7 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
         character_result = character_design_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
+                "artifact": "CHARACTER"
             },
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -93,8 +96,11 @@ def gen_image_node(state: PersonaWorkflowState) -> dict:
         model=IMAGE_PROMPT_GEN_MODEL,
         temperature=0.5
     )
-    structured_model = prompt_gen_model.with_structured_output(schema=PromptsSchema, method="json_schema")
-    outcome = structured_model.invoke(f"Provide 5 different prompts for image generation strictly using the provided character description. The character should be in different surroundings, clothes, positions, etc..., so make sure there is enough variety. The person's look should always be the same, but in contexts.\n\n Character description:\n{state.get("character")}")
+    structured_model = prompt_gen_model.with_structured_output(schema=PromptsSchema, method="json_schema").with_fallbacks([
+        ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1, temperature=0.5).with_structured_output(schema=PromptsSchema, method="json_schema"),
+        ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2, temperature=0.5).with_structured_output(schema=PromptsSchema, method="json_schema"),
+    ])
+    outcome = structured_model.invoke(f"Provide 4 different prompts for image generation strictly using the provided character description. The character should be in different surroundings, clothes, positions, etc..., so make sure there is enough variety. The person's look should always be the same, so the differences should be in the context and position.\n\n Character description:\n{state.get("character")}")
     generate_sample_images(prompts=outcome.prompts, influencer_name=state.get("influencer_name"))
     return {}
 
@@ -146,7 +152,8 @@ def human_review_node(state: PersonaWorkflowState) -> dict:
 def call_review_router_node(state: PersonaWorkflowState) -> dict:
     review_router_model = ChatOpenRouter(
         model=IDENTITY_MANAGER,
-        temperature=0.1
+        temperature=0.1,
+        max_tokens=1024
     )
     structured_model = review_router_model.with_structured_output(schema=ReviewSelection, method="json_schema")
     decision = structured_model.invoke(f"Decide which agent should work on the feedback and review its work. The following feedback received:\n\n{state.get("feedback")}")

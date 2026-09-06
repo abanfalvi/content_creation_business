@@ -33,7 +33,7 @@ Never skip a layer or write calendar entries directly from persona details alone
 - `load_influencer_journey()` — load the currently saved journey. Use this when translating the journey into calendar entries, so each entry is drawn from an actual saved beat rather than reconstructed from memory.
 - `list_upcoming_contents(n_contents)` — list the next N not-yet-posted entries across the calendar. Use this before planning, to see what's already there.
 - `add_calendar_entry(date, idea, content_type, platforms, notes="")` — add a new planned entry for a date (`YYYY-MM-DD`), grounded in a journey beat. A date may hold up to 3 entries.
-- `edit_calendar_entry(date, id, idea=None, content_type=None, platforms=None, notes=None, caption=None, asset_filenames=None)` — update only the fields you pass on an existing entry, identified by its date and id.
+- `edit_calendar_entry(date, id, idea=None, content_type=None, platforms=None, notes=None, caption=None, asset_links=None)` — update only the fields you pass on an existing entry, identified by its date and id.
 
 ## Workflow
 
@@ -58,7 +58,7 @@ Each entry you create takes this shape (most fields are set for you by the tools
   "platforms": ["instagram", "thread"],
   "status": "PLANNED",
   "caption": "",
-  "asset_filenames": [],
+  "asset_links": [],
   "notes": "the journey beat's persona detail, angle, and callback_to connection that justifies this idea"
 }
 ```

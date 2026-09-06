@@ -7,11 +7,12 @@ import wave, io, os, base64, time, httpx, uuid, json
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 from openrouter import OpenRouter, utils
-import fal_client
+from pydantic import BaseModel, Field
 from datetime import date
 
 from ..agents.persona_identity.persona_workflow import persona_gen_workflow
-from ..agents.content_production.manager import content_manager_agent
+from ..agents.content_production.manager import get_content_manager_agent
+from ..agents.engagement_community.specialist_agent import response_engagement_agent
 
 load_dotenv()
 
@@ -152,7 +153,7 @@ class AgentTools:
         })
 
     @tool
-    def call_content_production_manager(instruction: str, runtime: ToolRuntime[None, OrchestratorState]):
+    async def call_content_production_manager(instruction: str, runtime: ToolRuntime[None, OrchestratorState]):
         """Delegate to the Content Production department manager to plan or produce content
         for the currently active influencer.
 
@@ -171,7 +172,8 @@ class AgentTools:
         thread_id = runtime.config["configurable"]["thread_id"]
         writer = runtime.stream_writer
         result = {}
-        for mode, data in content_manager_agent.stream({
+        content_manager_agent = await get_content_manager_agent()
+        async for mode, data in content_manager_agent.astream({
                 "messages": instruction,
                 "influencer_name": runtime.state.get("influencer_name"),
                 "voice_name": runtime.state.get("voice_name"),
@@ -186,3 +188,31 @@ class AgentTools:
                 result = data
 
         return result["messages"][-1].content
+
+    @tool
+    def call_response_engagement_agent(instruction: str, runtime: ToolRuntime[None, OrchestratorState]) -> str:
+        "Delegate to the Engagement & Community department for the currently active influencer to get insights into how her content is performing online (e.g. recent media/Threads performance, engagement metrics). This only surfaces insights — it cannot be used to reply to audience comments, which is handled by a separate automated flow. `instruction` must state the concrete request. Requires an active influencer."
+        thread_id = runtime.config["configurable"]["thread_id"]
+        result = response_engagement_agent.invoke({
+                "messages": instruction,
+                "influencer_name": runtime.state.get("influencer_name"),
+                "active_step": "get_insights",
+            }, config={"configurable": {"thread_id": f"{thread_id}:response_engagement_agent"}})
+
+        return result["messages"][-1].content
+
+    @tool
+    def read_persona_info(identity: Literal["CHARACTER", "PERSONALITY", "BACKSTORY"], runtime: ToolRuntime[None, OrchestratorState]) -> str:
+        "Read the influencer's CHARACTER.md, PERSONALITY.md, or BACKSTORY.md file content"
+        influencer_name = runtime.state.get("influencer_name")
+
+        stored_persona_info = runtime.store.get(("content_production", influencer_name), identity.lower())
+        if stored_persona_info:
+            return json.dumps(stored_persona_info.value)
+
+        persona_path = f"src/influencers/{influencer_name}/{identity}.md"
+
+        with open(persona_path, "r", encoding="utf-8") as f:
+            persona = f.read()
+
+        return persona

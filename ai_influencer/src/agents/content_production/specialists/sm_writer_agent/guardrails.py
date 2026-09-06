@@ -1,14 +1,14 @@
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 from pathlib import Path
-import base64, re
+import base64, re, json
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents.middleware import after_agent, AgentState
 from langgraph.runtime import Runtime
 from langchain.messages import AIMessage, HumanMessage
 
-from .....models import SAFETY_MODEL
+from .....models import SAFETY_MODEL, SOLAR_FALLBACK_MODEL, PERSONA_FALLBACK_MODEL_2
 from .state import ContentCreatorState
 
 class OutputDecisionSchema(BaseModel):
@@ -53,16 +53,33 @@ caption_reviewer_model = ChatOpenRouter(
     timeout=120000
 )
 
-structured_safety_model = safety_model.with_structured_output(OutputDecisionSchema, method="json_schema", strict=True)
-structured_consistency_model = safety_model.with_structured_output(ConsistencyRubric, method="json_schema", strict=True)
-structured_caption_model = caption_reviewer_model.with_structured_output(CaptionRubric, method="json_schema", strict=True)
+safety_fallback_model_1 = ChatOpenRouter(model=SOLAR_FALLBACK_MODEL, temperature=0.2, max_tokens=2048, timeout=120000)
+safety_fallback_model_2 = ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2, temperature=0.2, max_tokens=2048, timeout=120000)
+caption_reviewer_fallback_model_1 = ChatOpenRouter(model=SOLAR_FALLBACK_MODEL, temperature=0.3, max_tokens=4096, timeout=120000)
+caption_reviewer_fallback_model_2 = ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2, temperature=0.3, max_tokens=4096, timeout=120000)
+
+structured_safety_model = safety_model.with_structured_output(OutputDecisionSchema, method="json_schema", strict=True).with_fallbacks([
+    safety_fallback_model_1.with_structured_output(OutputDecisionSchema, method="json_schema", strict=True),
+    safety_fallback_model_2.with_structured_output(OutputDecisionSchema, method="json_schema", strict=True),
+])
+structured_consistency_model = safety_model.with_structured_output(ConsistencyRubric, method="json_schema", strict=True).with_fallbacks([
+    safety_fallback_model_1.with_structured_output(ConsistencyRubric, method="json_schema", strict=True),
+    safety_fallback_model_2.with_structured_output(ConsistencyRubric, method="json_schema", strict=True),
+])
+structured_caption_model = caption_reviewer_model.with_structured_output(CaptionRubric, method="json_schema", strict=True).with_fallbacks([
+    caption_reviewer_fallback_model_1.with_structured_output(CaptionRubric, method="json_schema", strict=True),
+    caption_reviewer_fallback_model_2.with_structured_output(CaptionRubric, method="json_schema", strict=True),
+])
 
 @after_agent(can_jump_to=["model"])
 def safe_output_guardrail(state: ContentCreatorState, runtime: Runtime) -> dict[str, Any] | None:
     """LLM checks if the image/video & caption does not contain NSFW or harmful content"""
     influencer_name = state.get("influencer_name")
-    with open(f"src/influencers/{influencer_name}/social_contents/CAPTION.md", "r", encoding="utf-8") as f:
-        caption = f.read()
+    content_id = state.get("content_id")
+    with open(f"src/influencers/{influencer_name}/CALENDAR.json", "r", encoding="utf-8") as f:
+        calendar = json.load(f)
+        entry = [post for _, e in calendar.items() for post in e if post["id"] == content_id]
+        caption = entry[0]['caption']
 
     is_video = bool(state.get("video_url"))
     is_lipsynced = bool(state.get("lipsynced"))
@@ -77,10 +94,6 @@ def safe_output_guardrail(state: ContentCreatorState, runtime: Runtime) -> dict[
 
     if new_url is None:
         return None
-
-    headings = list(re.finditer(r"^#{1,6}.*$", caption, flags=re.MULTILINE))
-    if headings:
-        caption = caption[headings[-1].start():]
 
     # Use a model to evaluate safety
     if isinstance(new_url, list):
@@ -233,8 +246,11 @@ def check_caption_consistency(state: ContentCreatorState, runtime: Runtime) -> d
     personality_path = f"src/influencers/{influencer_name}/PERSONALITY.md"
     backstory_path = f"src/influencers/{influencer_name}/BACKSTORY.md"
 
-    with open(caption_path, "r", encoding="utf-8") as f:
-        caption = f.read()
+    content_id = state.get("content_id")
+    with open(f"src/influencers/{influencer_name}/CALENDAR.json", "r", encoding="utf-8") as f:
+        calendar = json.load(f)
+        entry = [post for _, e in calendar.items() for post in e if post["id"] == content_id]
+        caption = entry[0]['caption']
 
     with open(personality_path, "r", encoding="utf-8") as f:
         personality = f.read()

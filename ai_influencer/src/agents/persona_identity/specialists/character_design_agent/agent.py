@@ -6,21 +6,26 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolErrorMiddleware, ModelFallbackMiddleware
 
-from langchain.agents.middleware import ModelFallbackMiddleware
-
-from .....models import CHARACTER_DESIGN_AGENT
+from .....models import CHARACTER_DESIGN_AGENT, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 from .tools import AgentTools
 from .state import CharacterState
-from ...utils import checkpointer
+from ...utils import checkpointer, on_tool_error, verify_artifact
 from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 character_design_model = ChatOpenRouter(
     model=CHARACTER_DESIGN_AGENT,
-    temperature=0.5,
-    max_tokens=4096
+    temperature=0.4,
+    max_tokens=4096,
+    frequency_penalty=0.3
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1),
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2),
 )
 
 
@@ -42,7 +47,7 @@ character_design_agent = create_agent(
     model=character_design_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[],
+    middleware=[ToolErrorMiddleware(on_error=on_tool_error, tools=["append_content", "edit_character_design"]), model_fallback, verify_artifact],
     state_schema=CharacterState,
     checkpointer=checkpointer,
     store=shared_memory_store,

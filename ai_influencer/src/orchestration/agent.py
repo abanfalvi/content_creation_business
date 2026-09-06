@@ -8,8 +8,9 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelFallbackMiddleware
 
-from ..models import ORCHESTRATOR
+from ..models import ORCHESTRATOR, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 from .tools import AgentTools
 from .state import OrchestratorState
 from .utils import get_checkpointer
@@ -23,13 +24,20 @@ orchestrator_model = ChatOpenRouter(
     max_tokens=4096
 )
 
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1),
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2),
+)
+
 with open(r"src\orchestration\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
 all_tools = [
     AgentTools.call_content_production_manager,
     AgentTools.run_persona_creation_workflow,
-    AgentTools.submit_persona_review
+    AgentTools.submit_persona_review,
+    AgentTools.read_persona_info,
+    AgentTools.call_response_engagement_agent
 ]
 
 async def build_orchestrator():
@@ -38,6 +46,7 @@ async def build_orchestrator():
         model=orchestrator_model,
         tools=all_tools,
         system_prompt=SYSTEM_PROMPT,
+        middleware=[model_fallback],
         state_schema=OrchestratorState,
         checkpointer=checkpointer,
         store=shared_memory_store,

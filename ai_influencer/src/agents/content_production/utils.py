@@ -6,8 +6,16 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
-conn = sqlite3.connect("./checkpoints/content_production.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
+conn = aiosqlite.connect("./checkpoints/content_production.db", check_same_thread=False)
+checkpointer = AsyncSqliteSaver(conn)
+
+
+async def close_checkpointer() -> None:
+    """See src/orchestration/utils.py's close_checkpointer — this
+    connection's aiosqlite background thread is non-daemon too, and it's
+    only ever actually started once the content production agent runs, so
+    closing it is a no-op if that never happened this session."""
+    await conn.close()
 
 class FileEditingTools:
 

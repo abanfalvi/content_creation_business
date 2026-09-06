@@ -8,21 +8,27 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import dynamic_prompt
-from langchain.agents.middleware.types import ModelRequest
+from langchain.agents.middleware import dynamic_prompt, ToolErrorMiddleware, ModelFallbackMiddleware
+from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
 
-from .....models import BACKSTORY_AGENT
+from .....models import BACKSTORY_AGENT, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 from .tools import AgentTools
 from .state import BackstoryState
-from ...utils import checkpointer
+from ...utils import checkpointer, on_tool_error, verify_artifact
 from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 backstory_model = ChatOpenRouter(
     model=BACKSTORY_AGENT,
-    temperature=0.5,
-    max_tokens=4096
+    temperature=0.4,
+    max_tokens=4096,
+    frequency_penalty=0.3
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1),
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2),
 )
 
 @dynamic_prompt
@@ -54,7 +60,12 @@ backstory_agent = create_agent(
     model=backstory_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[inject_character_design],
+    middleware=[
+        inject_character_design,
+        ToolErrorMiddleware(on_error=on_tool_error, tools=["append_content", "edit_influencer_backstory"]),
+        model_fallback,
+        verify_artifact,
+    ],
     state_schema=BackstoryState,
     checkpointer=checkpointer,
     store=shared_memory_store,

@@ -55,7 +55,7 @@ def _handle_change(influencer_name: str, platform: str, change: dict) -> None:
     )
     try:
         response_handling_agent.invoke(
-            {"messages": [("user", task)], "influencer_name": influencer_name},
+            {"messages": [("user", task)], "influencer_name": influencer_name, "active_step": "answer_comments"},
             config={"configurable": {"thread_id": thread_id}},
         )
     except Exception as e:

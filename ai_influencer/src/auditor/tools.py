@@ -53,7 +53,7 @@ class AgentTools:
     @tool
     def call_skill_converter(runtime: ToolRuntime[None, AuditorState]) -> str:
         "Convert this influencer's saved successful traces into reusable skill files for the relevant specialist agents, then remove those traces from the store."
-        convert_to_skill(runtime.state.get("influencer_name"), runtime.store)
+        convert_to_skill(runtime.state.get("influencer_name"), runtime.state.get("department_name"), runtime.store)
         return "Your created success traces have been converted to skills and deleted from storage"
 
     @tool

@@ -6,7 +6,6 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 load_dotenv()
 
 BUFFER_NOT_ALLOWED_TOOLS = [
-    "get_account",
     "introspect_schema",
     "execute_query",
     "execute_mutation"

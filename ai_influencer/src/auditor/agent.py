@@ -7,10 +7,10 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import wrap_model_call
+from langchain.agents.middleware import wrap_model_call, ModelFallbackMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from ..models import AUDITOR_MODEL
+from ..models import AUDITOR_MODEL, SOLAR_FALLBACK_MODEL, PERSONA_FALLBACK_MODEL_2
 from .tools import AgentTools
 from .state import AuditorState
 from ..memory_store import shared_memory_store
@@ -21,6 +21,11 @@ auditor_model = ChatOpenRouter(
     model=AUDITOR_MODEL,
     temperature=0.2,
     max_tokens=4096
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=SOLAR_FALLBACK_MODEL),
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2),
 )
 
 with open(r"src\auditor\SYSTEM_PROMPT.md", "r") as f:
@@ -77,6 +82,7 @@ auditor_agent = create_agent(
     model=auditor_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
+    middleware=[model_fallback],
     state_schema=AuditorState,
     store=shared_memory_store
 )

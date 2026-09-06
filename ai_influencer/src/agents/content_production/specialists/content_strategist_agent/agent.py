@@ -7,10 +7,10 @@ from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
-from langchain.agents.middleware import wrap_model_call
+from langchain.agents.middleware import wrap_model_call, ModelFallbackMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from .....models import CONTENT_CALENDAR_AGENT
+from .....models import CONTENT_CALENDAR_AGENT, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 from .tools import AgentTools
 from .state import ContentPlanningState
 from ...utils import checkpointer
@@ -22,6 +22,11 @@ content_strategist_model = ChatOpenRouter(
     model=CONTENT_CALENDAR_AGENT,
     temperature=0.5,
     max_tokens=4096
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1),
+    ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2),
 )
 
 with open(r"src\agents\content_production\specialists\content_strategist_agent\SYSTEM_PROMPT.md", "r") as f:
@@ -81,7 +86,7 @@ content_strategist_agent = create_agent(
     model=content_strategist_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[],
+    middleware=[model_fallback],
     state_schema=ContentPlanningState,
     checkpointer=checkpointer,
     store=shared_memory_store

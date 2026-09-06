@@ -1,7 +1,9 @@
 # TODO
-- Develop Engagement & Community tier: test run, wire it into the system
+- Set up proper webhook
 - Memory management
 - Implement self-evolution: correct failed traces
+- Improve token counter
+- Have cron jobs
 
 # Under development
 
@@ -29,8 +31,7 @@ Workflow: design the character -> generate the images -> LLM judge -> if OK, wri
 - Content Calendar Agent
 
 💬 **Engagement & Community Director**
-- DM Response & Comment Reply Agent
-- Follower Growth & Community Health Agent
+- DM Response & Comment Reply + Follower Growth Agent
 (- Sentiment & Community Health Monitor)
 
 💸 **Monetization & Partnerships Director** (Comes later!)

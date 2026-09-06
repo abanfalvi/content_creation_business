@@ -5,7 +5,7 @@ from langchain_core.messages.utils import get_buffer_string
 from langchain.tools import tool, ToolRuntime
 from langchain_openrouter import ChatOpenRouter
 
-import wave, io, os, base64, time, httpx, json
+import wave, io, os, base64, time, httpx, json, re
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 from openrouter import OpenRouter, utils
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from ...utils import FileEditingTools, SkillLoadingTools
 from .state import ContentCreatorState
-from .....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL, MEMORY_MANAGEMENT_MODEL
+from .....models import IMAGE_GEN_MODEL, VIDEO_GEN_MODEL, LIPSYNC_MODEL, MEMORY_MANAGEMENT_MODEL, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 
 load_dotenv()
 
@@ -43,6 +43,9 @@ class CharacterFeatures(BaseModel):
     negative_constraints: List[str] = Field(
         description="Things that must never appear in generated visuals (e.g. no tattoos, no freckles, no heavy makeup) — usable as negative-prompt guidance."
     )
+
+class EditContentCalendar(BaseModel):
+    pass
 
 _KEEP_RECENT_MESSAGES = 12
 """How many of the most recent messages `compress_context` always leaves untouched."""
@@ -113,13 +116,31 @@ def _summarize_messages(messages_to_summarize: list) -> str:
     response = _compression_model.invoke(_COMPRESSION_PROMPT.format(messages=formatted))
     return response.content if isinstance(response.content, str) else str(response.content)
 
+def update_calendar(influencer_name: str, aim: Literal["append", "edit"], content_id: str, to_replace: str = "", replace_with: str = "", caption_text: str = "", is_caption: bool = True, url: str = "") -> None:
+    with open(f"src/influencers/{influencer_name}/CALENDAR.json", "r", encoding="utf-8") as f:
+        calendar = json.loads(f.read())
+    entry = [post for _, e in calendar.items() for post in e if post["id"] == content_id]
+    if is_caption:
+        if aim == "edit":
+            entry[0]['caption'] = entry[0]['caption'].replace(to_replace, replace_with)
+        else:
+            entry[0]['caption'] = caption_text
+    else:
+        entry[0]['asset_links'].append(url)
+
+    with open(f"src/influencers/{influencer_name}/CALENDAR.json", "w", encoding="utf-8") as f:
+        json.dump(calendar, f, indent=2)
+
+    return None
+
 
 class AgentTools:
 
     @tool
     def generate_image(prompt: str, filename: str, runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
-        "Generate an image from a text prompt via OpenRouter and save it as '{filename}.jpg' under the influencer's social_contents/images folder. Returns the image for you to inspect and stores its hosted URL in state as img_url."
-        full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/images"
+        "Generate an image from a text prompt via OpenRouter and save it as '{filename}.jpg' under the influencer's social_contents/images folder. content_id is the CALENDAR.json entry this asset belongs to — its hosted URL is recorded there automatically. Returns the image for you to inspect and stores its hosted URL in state as img_url."
+        influencer_name = runtime.state.get("influencer_name")
+        full_output_path = f"src/influencers/{influencer_name}/social_contents/images"
         os.makedirs(full_output_path, exist_ok=True)
         today = datetime.now().strftime("%Y%m%d_%H%M%S")
         with OpenRouter(api_key=os.getenv("OPENROUTER_API_KEY", "")) as open_router:
@@ -139,6 +160,8 @@ class AgentTools:
 
         img_url = fal_client.upload_file(f"{full_output_path}/{today}_{filename}.jpg")
 
+        update_calendar(influencer_name, "append", runtime.state.get("content_id"), is_caption=False, url=img_url)
+
         return Command(
             update={
                 "messages":[
@@ -152,16 +175,17 @@ class AgentTools:
                         },
                     ]),
                 ],
-                "img_url": img_url,
+                "img_url": [img_url],
             }
         )
 
     @tool
     def edit_image(prompt: str, filename: str, runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
-        "Edit an image per the given prompt, grounded against the influencer's most recently generated images (or, if none exist yet, her locked reference photos), and save the result as '{filename}.jpg' under the influencer's social_contents/images folder. Reference images are fetched automatically — no other tool call needed first. Returns the edited image for you to inspect and updates its hosted URL in state as img_url."
+        "Edit an image per the given prompt, grounded against the influencer's most recently generated images (or, if none exist yet, her locked reference photos), and save the result as '{filename}.jpg' under the influencer's social_contents/images folder. Reference images are fetched automatically — no other tool call needed first. content_id is the CALENDAR.json entry this asset belongs to — its hosted URL is recorded there automatically. Returns the edited image for you to inspect and updates its hosted URL in state as img_url."
         influencer_name = runtime.state.get("influencer_name")
         prev_images_folder = f"src/influencers/{influencer_name}/social_contents/images"
         image_urls = []
+        os.makedirs(prev_images_folder, exist_ok=True)
         if Path(prev_images_folder).exists():
             # Retrieve the last three images for the agent
             history_files = sorted(Path(prev_images_folder).glob("*.jpg"))[-3:]
@@ -187,6 +211,8 @@ class AgentTools:
         with open(f"{prev_images_folder}/{today}_{filename}.jpg", "wb") as f:
             f.write(image_bytes)
 
+        update_calendar(influencer_name, "append", runtime.state.get("content_id"), is_caption=False, url=edited_url)
+
         return Command(update={
             "messages":[
                 ToolMessage(content= "Image has been successfully edited and saved", tool_call_id=runtime.tool_call_id),
@@ -204,9 +230,10 @@ class AgentTools:
 
     @tool
     def generate_video(prompt: str, filename: str, duration: int, runtime: ToolRuntime[None, ContentCreatorState], from_image: bool = False) -> Command:
-        "Generate a short video from a text prompt via OpenRouter and save it as '{filename}.mp4' under the influencer's social_contents/videos folder. Set from_image=True to animate the most recently generated image (img_url in state) as the video's first frame instead of generating from text alone. duration is in seconds and capped at 10. Returns the video for you to inspect and stores its hosted URL in state as video_url."
+        "Generate a short video from a text prompt via OpenRouter and save it as '{filename}.mp4' under the influencer's social_contents/videos folder. Set from_image=True to animate the most recently generated image (img_url in state) as the video's first frame instead of generating from text alone. duration is in seconds and capped at 10. content_id is the CALENDAR.json entry this asset belongs to — its hosted URL is recorded there automatically. Returns the video for you to inspect and stores its hosted URL in state as video_url."
         assert duration <= 10, "Duration must be max 10 seconds long"
-        full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/videos"
+        influencer_name = runtime.state.get("influencer_name")
+        full_output_path = f"src/influencers/{influencer_name}/social_contents/videos"
         os.makedirs(full_output_path, exist_ok=True)
         retries = utils.RetryConfig("backoff", utils.BackoffStrategy(500, 5000, 1.5, 30000), False)
         today = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -248,6 +275,8 @@ class AgentTools:
 
         video_url = fal_client.upload_file(f"{full_output_path}/{today}_{filename}.mp4")
 
+        update_calendar(influencer_name, "append", runtime.state.get("content_id"), is_caption=False, url=video_url)
+
         return Command(
             update={
                 "messages": [
@@ -267,8 +296,9 @@ class AgentTools:
 
     @tool
     def generate_audio(speech_input: str, filename: str, runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
-        "Generate a speech clip for the given text using the influencer's selected voice (voice_name in state) via Gemini TTS, and save it as '{filename}.wav' under the influencer's social_contents/audio folder. Returns the audio for you to listen to and stores its hosted URL and duration in state as audio_url and audio_duration."
-        full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/audio"
+        "Generate a speech clip for the given text using the influencer's selected voice (voice_name in state) via Gemini TTS, and save it as '{filename}.wav' under the influencer's social_contents/audio folder. content_id is the CALENDAR.json entry this asset belongs to — its hosted URL is recorded there automatically. Returns the audio for you to listen to and stores its hosted URL and duration in state as audio_url and audio_duration."
+        influencer_name = runtime.state.get("influencer_name")
+        full_output_path = f"src/influencers/{influencer_name}/social_contents/audio"
         os.makedirs(full_output_path, exist_ok=True)
         today = datetime.now().strftime("%Y%m%d_%H%M%S")
         with OpenRouter(
@@ -290,7 +320,7 @@ class AgentTools:
             with open(f"{full_output_path}/{today}_{filename}.wav", "wb") as f:
                 f.write(wav_bytes)
 
-            audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
+            # audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
 
         audio_url = fal_client.upload_file(f"{full_output_path}/{today}_{filename}.wav")
 
@@ -314,8 +344,9 @@ class AgentTools:
 
     @tool
     def lipsync_video_wth_audio(filename: str, runtime: ToolRuntime[None, ContentCreatorState]) -> Command:
-        "Lip-sync the most recently generated video (video_url in state) to the most recently generated audio (audio_url in state) and save the result as '{filename}.mp4' under the influencer's social_contents/lipsynced folder. Returns the synced video for you to inspect and stores its URL in state as lipsynced."
-        full_output_path = f"src/influencers/{runtime.state.get("influencer_name")}/social_contents/lipsynced"
+        "Lip-sync the most recently generated video (video_url in state) to the most recently generated audio (audio_url in state) and save the result as '{filename}.mp4' under the influencer's social_contents/lipsynced folder. content_id is the CALENDAR.json entry this asset belongs to — its hosted URL is recorded there automatically. Returns the synced video for you to inspect and stores its URL in state as lipsynced."
+        influencer_name = runtime.state.get("influencer_name")
+        full_output_path = f"src/influencers/{influencer_name}/social_contents/lipsynced"
         os.makedirs(full_output_path, exist_ok=True)
         result = fal_client.submit(
             LIPSYNC_MODEL,
@@ -324,6 +355,10 @@ class AgentTools:
                 "audio_url": runtime.state.get("audio_url"),
             },
         ).get()
+
+        lipsynced_url = result["video"]["url"]
+        update_calendar(influencer_name, "append", runtime.state.get("content_id"), is_caption=False, url=lipsynced_url)
+
         return Command(
             update={
                 "messages": [
@@ -332,12 +367,12 @@ class AgentTools:
                         {"type": "text", "text": f"The generated video ({full_output_path}) is the following:"},
                         {
                             "type": "video",
-                            "url": result["video"]["url"],
+                            "url": lipsynced_url,
                             "mime_type": "video/mp4",
                         },
                     ]),
                 ],
-                "lipsynced": result["video"]["url"]
+                "lipsynced": lipsynced_url
             }
         )
 
@@ -356,9 +391,18 @@ class AgentTools:
 
     @tool
     def append_content(content: str, runtime: ToolRuntime[None, ContentCreatorState]) -> str:
-        "Append new content to the end of the influencer's CAPTION.md file"
+        "Append new content to the end of the influencer's CAPTION.md file. Add your caption content after 'Caption text: ' "
         influencer_name = runtime.state.get("influencer_name")
         influencer_folder = f"src/influencers/{influencer_name}/social_contents"
+        pattern = r"Caption text: (.*)- Media type:"
+        match = re.search(pattern, content, flags=re.DOTALL)
+        if match:
+            update_calendar(
+                influencer_name,
+                "append",
+                runtime.state.get("content_id"),
+                caption_text=match.group(1)
+            )
         return FileEditingTools.append_filecontent(content, filepath=f"{influencer_folder}/CAPTION.md")
 
     @tool
@@ -366,6 +410,13 @@ class AgentTools:
         "Replace an exact snippet of text in the influencer's CAPTION.md file with new text"
         influencer_name = runtime.state.get("influencer_name")
         influencer_folder = f"src/influencers/{influencer_name}/social_contents"
+        update_calendar(
+            influencer_name,
+            "edit",
+            runtime.state.get("content_id"),
+            to_replace,
+            replace_with
+        )
         return FileEditingTools.edit_filecontent(to_replace, replace_with, filepath=f"{influencer_folder}/CAPTION.md")
 
     @tool
@@ -386,7 +437,11 @@ class AgentTools:
         extracter_model = ChatOpenRouter(model=MEMORY_MANAGEMENT_MODEL, temperature=.2)
         extraction_prompt = f"Based on the provided schema, fill in the sections with the information about this influencer. Fill in those that you found information about:\n\n {persona}"
 
-        result = extracter_model.with_structured_output(schema=CharacterFeatures, method="json_schema").invoke(extraction_prompt)
+        structured_extracter_model = extracter_model.with_structured_output(schema=CharacterFeatures, method="json_schema").with_fallbacks([
+            ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1, temperature=.2).with_structured_output(schema=CharacterFeatures, method="json_schema"),
+            ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2, temperature=.2).with_structured_output(schema=CharacterFeatures, method="json_schema"),
+        ])
+        result = structured_extracter_model.invoke(extraction_prompt)
         runtime.store.put(
             ("content_production", influencer_name,),
             identity.lower(),

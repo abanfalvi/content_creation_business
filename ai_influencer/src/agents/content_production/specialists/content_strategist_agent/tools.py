@@ -14,11 +14,19 @@ from pydantic import BaseModel, Field
 
 from ...utils import FileEditingTools
 from .state import ContentPlanningState
-from .....models import MEMORY_MANAGEMENT_MODEL
+from .....models import MEMORY_MANAGEMENT_MODEL, PERSONA_FALLBACK_MODEL_1, PERSONA_FALLBACK_MODEL_2
 
 load_dotenv()
 
 _calendar_lock = threading.Lock()
+
+def _generate_short_id(content_calendar: dict) -> str:
+    "Generate a short (8-character) id that's easy for an agent to read back and retype exactly, unique within this calendar."
+    existing_ids = {entry["id"] for entries in content_calendar.values() for entry in entries}
+    while True:
+        candidate = uuid.uuid4().hex[:8]
+        if candidate not in existing_ids:
+            return candidate
 
 class PersonalityFeatures(BaseModel):
     core_values: List[str] = Field(
@@ -87,8 +95,8 @@ class InfluencerEvent(BaseModel):
 
 class InfluencerJourney(BaseModel):
     theme: str = Field(
-        description="The one-sentence throughline for the whole week — the single arc every beat serves, "
-        "e.g. 'training for her first 10k despite hating mornings.' Every InfluencerEvent should visibly serve this."
+        description="The one-short phrase, a couple of words throughline for the X days — the single arc every beat serves, "
+        "Every InfluencerEvent should visibly serve this."
     )
     week_start: str = Field(description="The first date this journey covers, YYYY-MM-DD.")
     arc: List[InfluencerEvent] = Field(
@@ -111,13 +119,13 @@ class AgentTools:
                 content_calendar = json.load(f)
 
             content_calendar.setdefault(date, []).append({
-                "id": str(uuid.uuid4()),
+                "id": _generate_short_id(content_calendar),
                 "theme": idea,
                 "content_type": content_type,
                 "platforms": platforms,
                 "status": "PLANNED",
                 "caption": "",
-                "asset_filenames": [],
+                "asset_links": [],
                 "notes": notes
             })
 
@@ -127,7 +135,7 @@ class AgentTools:
         return f"Entry has been added successfully for {date}!"
 
     @tool
-    def edit_calendar_entry(date: str, id: str, runtime: ToolRuntime[None, ContentPlanningState], idea: Optional[str] = None, content_type: Optional[Literal["image", "video", "text"]] = None, platforms: Optional[List[Literal["instagram", "thread"]]] = None, notes: Optional[str] = None, caption: Optional[str] = None, asset_filenames: Optional[List[str]] = None):
+    def edit_calendar_entry(date: str, id: str, runtime: ToolRuntime[None, ContentPlanningState], idea: Optional[str] = None, content_type: Optional[Literal["image", "video", "text"]] = None, platforms: Optional[List[Literal["instagram", "thread"]]] = None, notes: Optional[str] = None, caption: Optional[str] = None, asset_links: Optional[List[str]] = None):
         "Update one or more fields of an existing CALENDAR.json entry, identified by its date and id. Only the fields you pass are changed."
         influencer_name = runtime.state.get("influencer_name")
         calendar_path = f"src/influencers/{influencer_name}/CALENDAR.json"
@@ -140,7 +148,7 @@ class AgentTools:
             if entry is None:
                 return f"No entry found with id {id} on {date}"
 
-            updates = {"theme": idea, "content_type": content_type, "platforms": platforms, "notes": notes, "caption": caption, "asset_filenames": asset_filenames}
+            updates = {"theme": idea, "content_type": content_type, "platforms": platforms, "notes": notes, "caption": caption, "asset_links": asset_links}
             entry.update({k: v for k, v in updates.items() if v is not None})
 
             with open(calendar_path, "w", encoding="utf-8") as f:
@@ -185,7 +193,11 @@ class AgentTools:
         extracter_model = ChatOpenRouter(model=MEMORY_MANAGEMENT_MODEL, temperature=.2)
         extraction_prompt = f"Based on the provided schema, fill in the sections with the information about this influencer. Fill in those that you found information about:\n\n {persona}"
 
-        result = extracter_model.with_structured_output(schema=schema, method="json_schema").invoke(extraction_prompt)
+        structured_extracter_model = extracter_model.with_structured_output(schema=schema, method="json_schema").with_fallbacks([
+            ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_1, temperature=.2).with_structured_output(schema=schema, method="json_schema"),
+            ChatOpenRouter(model=PERSONA_FALLBACK_MODEL_2, temperature=.2).with_structured_output(schema=schema, method="json_schema"),
+        ])
+        result = structured_extracter_model.invoke(extraction_prompt)
         runtime.store.put(
             ("content_production", influencer_name,),
             identity.lower(),
@@ -201,7 +213,7 @@ class AgentTools:
 
     @tool
     def save_influencer_journey(journey: InfluencerJourney, runtime: ToolRuntime[None, ContentPlanningState]):
-        "Save the journey the influencer is going to take in the next 7 days"
+        "Save the journey the influencer is going to take in the next X days"
         influencer_name = runtime.state.get("influencer_name")
         today = date.today()
 

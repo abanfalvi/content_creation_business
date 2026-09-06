@@ -62,6 +62,16 @@ def all_sessions() -> dict[str, str]:
     return dict(_load()["sessions"])
 
 
+def delete_session(name: str) -> None:
+    """Forget a named session's thread pointer. The orchestrator's own
+    checkpointer still holds that thread_id's message history — this only
+    removes the CLI's name -> thread_id mapping, so the session stops
+    appearing in /sessions and reusing the name later starts fresh."""
+    state = _load()
+    state["sessions"].pop(name, None)
+    _save(state)
+
+
 def get_default_influencer() -> str | None:
     """The influencer slug new sessions should start with, if one was set."""
     return _load().get("default_influencer")

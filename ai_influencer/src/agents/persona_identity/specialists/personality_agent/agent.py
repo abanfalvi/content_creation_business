@@ -11,20 +11,25 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain.agents.middleware.types import ModelRequest
 
-from langchain.agents.middleware import before_agent
+from langchain.agents.middleware import ToolErrorMiddleware, ModelFallbackMiddleware
 
-from .....models import PERSONALITY_AGENT
+from .....models import PERSONALITY_AGENT, MIMO_FALLBACK_MODEL
 from .tools import AgentTools
 from .state import PersonalityState
-from ...utils import checkpointer
+from ...utils import checkpointer, on_tool_error, verify_artifact
 from .....memory_store import shared_memory_store
 
 load_dotenv()
 
 personality_model = ChatOpenRouter(
     model=PERSONALITY_AGENT,
-    temperature=0.5,
-    max_tokens=4096
+    temperature=0.4,
+    max_tokens=4096,
+    frequency_penalty=0.3
+)
+
+model_fallback = ModelFallbackMiddleware(
+    ChatOpenRouter(model=MIMO_FALLBACK_MODEL),
 )
 
 @dynamic_prompt
@@ -58,7 +63,12 @@ personality_agent = create_agent(
     model=personality_model,
     tools=all_tools,
     system_prompt=SYSTEM_PROMPT,
-    middleware=[inject_character_design],
+    middleware=[
+        inject_character_design, 
+        ToolErrorMiddleware(on_error=on_tool_error, tools=["append_content", "edit_influencer_personality"]), 
+        model_fallback,
+        verify_artifact
+    ],
     state_schema=PersonalityState,
     checkpointer=checkpointer,
     store=shared_memory_store,

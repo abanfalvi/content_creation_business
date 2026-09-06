@@ -3,4 +3,5 @@ from typing_extensions import NotRequired
 
 class CharacterState(AgentState):
     influencer_name: NotRequired[str]
+    artifact: NotRequired[str]
     # character_description: NotRequired[str]

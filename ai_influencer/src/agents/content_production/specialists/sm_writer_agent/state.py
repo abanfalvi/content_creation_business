@@ -6,6 +6,7 @@ import operator
 class ContentCreatorState(AgentState):
     influencer_name: str
     voice_name: str
+    content_id: str
     img_url: NotRequired[Annotated[List[str], operator.add]]
     audio_url: NotRequired[str]
     audio_duration: NotRequired[float]
