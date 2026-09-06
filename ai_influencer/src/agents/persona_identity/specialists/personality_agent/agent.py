@@ -16,7 +16,7 @@ from langchain.agents.middleware import ToolErrorMiddleware, ModelFallbackMiddle
 from .....models import PERSONALITY_AGENT, MIMO_FALLBACK_MODEL
 from .tools import AgentTools
 from .state import PersonalityState
-from ...utils import checkpointer, on_tool_error, verify_artifact
+from ...utils import checkpointer, on_tool_error, verify_artifact, render_available_skills
 from .....memory_store import shared_memory_store
 
 load_dotenv()
@@ -32,27 +32,32 @@ model_fallback = ModelFallbackMiddleware(
     ChatOpenRouter(model=MIMO_FALLBACK_MODEL),
 )
 
-@dynamic_prompt
-def inject_character_design(request: ModelRequest) -> str:
-    influencer_name = request.state.get("influencer_name")
-    if not influencer_name:
-        return SYSTEM_PROMPT
-    path = f"src/influencers/{influencer_name}/CHARACTER.md"
-    if not os.path.exists(path):
-        return SYSTEM_PROMPT
-    with open(path, "r", encoding="utf-8") as f:
-        character = f.read()
-    return f"{SYSTEM_PROMPT}\n\n---\n\nThe following character has already been designed. Keep personality and voice choices consistent with it:\n\n{character}"
-
-
 with open(r"src\agents\persona_identity\specialists\personality_agent\SYSTEM_PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
+SKILLS_PATH = r"src\agents\persona_identity\specialists\personality_agent\skills"
+
+@dynamic_prompt
+def inject_character_design(request: ModelRequest) -> str:
+    prompt = SYSTEM_PROMPT
+
+    skills = render_available_skills(SKILLS_PATH)
+    if skills:
+        prompt = f"{prompt}\n\n---\n\nThe following skills from past runs are available to guide your work:\n\n{skills}"
+
+    influencer_name = request.state.get("influencer_name")
+    if not influencer_name:
+        return prompt
+    path = f"src/influencers/{influencer_name}/CHARACTER.md"
+    if not os.path.exists(path):
+        return prompt
+    with open(path, "r", encoding="utf-8") as f:
+        character = f.read()
+    return f"{prompt}\n\n---\n\nThe following character has already been designed. Keep personality and voice choices consistent with it:\n\n{character}"
+
 all_tools = [
-    AgentTools.load_available_skills,
     AgentTools.append_content,
     AgentTools.edit_influencer_personality,
-    AgentTools.load_skill_content,
     AgentTools.read_influencer_personality,
     AgentTools.preview_voice,
     AgentTools.select_influencer_voice,

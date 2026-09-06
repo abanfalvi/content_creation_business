@@ -5,10 +5,10 @@ from langchain.tools import tool, ToolRuntime
 from langchain_core.documents import Document
 import json, frontmatter, os
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import Optional
 from pathlib import Path
 
-from ...utils import FileEditingTools, SkillLoadingTools, check_previous_influencers_persona
+from ...utils import FileEditingTools, check_previous_influencers_persona
 from .state import CharacterState
 
 load_dotenv()
@@ -71,13 +71,3 @@ class AgentTools:
         "Check the already-designed character/personality/backstory summaries of every other existing influencer, so this one's visual identity (archetype, vibe, coloring, style) isn't too similar to any of them. Call before finalizing the Identity Snapshot and Consistency Anchors."
         influencer_name = runtime.state.get("influencer_name")
         return check_previous_influencers_persona(influencer_name, runtime.store)
-
-    @tool
-    def load_available_skills() -> List[dict] | str:
-        "List the names and descriptions of the character design skills available to load"
-        return SkillLoadingTools.load_skill_names(r"src\agents\persona_identity\specialists\character_design_agent\skills")
-
-    @tool
-    def load_skill_content(skill_name: str) -> str:
-        "Load the full content of a specific character design skill by name"
-        return SkillLoadingTools.load_skill(skill_name, r"src\agents\persona_identity\specialists\character_design_agent\skills")

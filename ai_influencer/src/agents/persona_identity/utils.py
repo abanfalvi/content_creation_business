@@ -1,5 +1,5 @@
 import frontmatter, os, json
-from typing import Any, List, Literal
+from typing import Any, Literal
 from pathlib import Path
 from json import JSONDecodeError
 import sqlite3
@@ -71,28 +71,23 @@ class FileEditingTools:
 
         return "The file has been successfully edited with your changes"
 
-class SkillLoadingTools:
-
-    def load_skill(skill_name: str, skill_path: str) -> str:
-        "Load the content of the specific skill"
-        try:
-            post = frontmatter.load(f"{skill_path}/{skill_name}.md")
-        except:
-            return f"{skill_name} cannot be retrieved!"
-        return post.content
-
-    def load_skill_names(skill_path: str) -> List[dict] | str:
-        "Load the name and descriptions of the available skills"
-        os.makedirs(skill_path, exist_ok=True)
-        all_skills = list(Path(skill_path).glob("*.md"))
-        if all_skills:
-            all_metadata = []
-            for skill in all_skills:
-                post = frontmatter.load(skill)
-                all_metadata.append(post.metadata)
-            return all_metadata
-        else:
-            return "No skills available yet!"
+def render_available_skills(skill_path: str) -> str:
+    """Render every skill under skill_path as a prompt-ready block, or '' if
+    none exist yet. Persona-identity specialists run too rarely for a
+    self-checked 'are there any skills?' tool call to pay for itself, so the
+    (usually empty) skills directory is injected straight into the system
+    prompt instead."""
+    os.makedirs(skill_path, exist_ok=True)
+    skills = sorted(Path(skill_path).glob("*.md"))
+    if not skills:
+        return ""
+    blocks = []
+    for skill in skills:
+        post = frontmatter.load(skill)
+        name = post.metadata.get("name", skill.stem)
+        description = post.metadata.get("description", "")
+        blocks.append(f"### {name}\n{description}\n\n{post.content}")
+    return "\n\n".join(blocks)
 
 def check_previous_influencers_persona(current_influencer: str | None, store) -> str:
     """Summarize every other already-designed influencer's persona, pulling the

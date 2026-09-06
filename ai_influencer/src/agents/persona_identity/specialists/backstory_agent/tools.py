@@ -5,9 +5,9 @@ from langchain.tools import tool, ToolRuntime
 from langchain_core.documents import Document
 import json, frontmatter, os, base64
 from dotenv import load_dotenv
-from typing import List, Optional, Literal
+from typing import Optional, Literal
 
-from ...utils import FileEditingTools, SkillLoadingTools, check_previous_influencers_persona
+from ...utils import FileEditingTools, check_previous_influencers_persona
 from .state import BackstoryState
 
 load_dotenv()
@@ -44,14 +44,3 @@ class AgentTools:
         influencer_name = runtime.state.get("influencer_name")
         return check_previous_influencers_persona(influencer_name, runtime.store)
 
-    @tool
-    def load_available_skills() -> List[dict] | str:
-        "List the names and descriptions of the personality skills available to load"
-        return SkillLoadingTools.load_skill_names(r"src\agents\persona_identity\specialists\backstory_agent\skills")
-
-    @tool
-    def load_skill_content(skill_name: str) -> str:
-        "Load the full content of a specific personality skill by name"
-        return SkillLoadingTools.load_skill(skill_name, r"src\agents\persona_identity\specialists\backstory_agent\skills")
-
-    

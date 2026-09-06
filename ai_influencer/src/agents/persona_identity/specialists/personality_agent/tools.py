@@ -5,10 +5,10 @@ from langchain.tools import tool, ToolRuntime
 from langchain_core.documents import Document
 import json, frontmatter, os, base64, wave, io
 from dotenv import load_dotenv
-from typing import List, Optional, Literal
+from typing import Optional, Literal
 from openrouter import OpenRouter
 
-from ...utils import FileEditingTools, SkillLoadingTools, check_previous_influencers_persona
+from ...utils import FileEditingTools, check_previous_influencers_persona
 from .state import PersonalityState
 
 load_dotenv()
@@ -61,16 +61,6 @@ class AgentTools:
         "Check the already-designed character/personality/backstory summaries of every other existing influencer, so this one's values, traits, and communication style aren't too similar to any of them. Call before finalizing Core Values, Personality Traits, and Consistency Anchors."
         influencer_name = runtime.state.get("influencer_name")
         return check_previous_influencers_persona(influencer_name, runtime.store)
-
-    @tool
-    def load_available_skills() -> List[dict] | str:
-        "List the names and descriptions of the personality skills available to load"
-        return SkillLoadingTools.load_skill_names(r"src\agents\persona_identity\specialists\personality_agent\skills")
-
-    @tool
-    def load_skill_content(skill_name: str) -> str:
-        "Load the full content of a specific personality skill by name"
-        return SkillLoadingTools.load_skill(skill_name, r"src\agents\persona_identity\specialists\personality_agent\skills")
 
     @staticmethod
     def _generate_voice_sample(voice_name: str) -> tuple[str, str]:
