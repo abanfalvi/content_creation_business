@@ -1,8 +1,6 @@
 # TODO
 - Set up proper webhook
-- Memory management
 - Implement self-evolution: correct failed traces
-- Improve token counter
 
 # Under development
 

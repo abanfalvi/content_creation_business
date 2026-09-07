@@ -26,6 +26,7 @@ from ...models import IDENTITY_MANAGER, IMAGE_GEN_MODEL, IMAGE_PROMPT_GEN_MODEL,
 from ...auditor.tools import AgentTools
 from ...auditor.agent import auditor_agent
 from ...memory_store import shared_memory_store
+from ..utils import log_token_usage, sum_usage
 
 from langgraph.graph import StateGraph, START, END
 
@@ -43,33 +44,63 @@ def call_specialist_agent(agent: Literal["backstory_agent", "personality_agent",
     if feedback:
         prompt += f"\n\n Your work has been reviewed and you received the following feedback to refine your work.\n{feedback}"
     if agent == "backstory_agent":
+        config = {"configurable": {"thread_id": thread_id}}
+        before_count = len(backstory_agent.get_state(config).values.get("messages", []))
         backstory_result = backstory_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
                 "influencer_name": influencer_name,
                 "artifact": "BACKSTORY"
             },
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
+        )
+        turn_usage = sum_usage(backstory_result["messages"][before_count:])
+        log_token_usage(
+            "persona_identity",
+            "backstory_agent",
+            thread_id,
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
         )
 
         return backstory_result["messages"][-1].content
     elif agent == "personality_agent":
+        config = {"configurable": {"thread_id": thread_id}}
+        before_count = len(personality_agent.get_state(config).values.get("messages", []))
         personality_result = personality_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
                 "influencer_name": influencer_name,
                 "artifact": "PERSONALITY"
             },
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
+        )
+        turn_usage = sum_usage(personality_result["messages"][before_count:])
+        log_token_usage(
+            "persona_identity",
+            "personality_agent",
+            thread_id,
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
         )
         return personality_result["messages"][-1].content, personality_result.get("voice_name")
     elif agent == "character_design_agent":
+        config = {"configurable": {"thread_id": thread_id}}
+        before_count = len(character_design_agent.get_state(config).values.get("messages", []))
         character_result = character_design_agent.invoke(
             {
                 "messages": [HumanMessage(content=prompt)],
                 "artifact": "CHARACTER"
             },
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
+        )
+        turn_usage = sum_usage(character_result["messages"][before_count:])
+        log_token_usage(
+            "persona_identity",
+            "character_design_agent",
+            thread_id,
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
         )
         return character_result["messages"][-1].content, character_result.get("influencer_name")
 
@@ -160,6 +191,7 @@ def call_review_router_node(state: PersonaWorkflowState) -> dict:
     return {"agent_to_review": decision.agent_to_review}
 
 def lessons_learned_node(state: PersonaWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
+    get_stream_writer()({"step": "auditor_agent"})
     all_traces = {}
     for (name, agent) in [
         ("character_design_agent", character_design_agent),
@@ -167,7 +199,6 @@ def lessons_learned_node(state: PersonaWorkflowState, *, store: BaseStore, confi
         ("backstory_agent", backstory_agent),
     ]:
         agent_thread_id = f"{config['configurable']['thread_id']}:{name}"
-
         traces = AgentTools.extract_learnable_traces(thread_id=agent_thread_id, agent=agent, active_agent=name)
         result = auditor_agent.invoke({"messages": [("user", f"""
                     Analyse the following traces from {name} by collecting the steps that were successully
@@ -185,6 +216,15 @@ def lessons_learned_node(state: PersonaWorkflowState, *, store: BaseStore, confi
             "department_name": "persona_identity",
             "active_step": "save_traces"
         })
+
+        turn_usage = sum_usage(result["messages"])
+        log_token_usage(
+            "persona_identity",
+            "auditor",
+            agent_thread_id,
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
+        )
         all_traces[name] = result["messages"][-1].content
 
     return {"lessons_learned": all_traces}

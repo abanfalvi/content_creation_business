@@ -3,18 +3,40 @@ from langchain_core.messages import ToolMessage, HumanMessage
 from langchain.tools import tool, ToolRuntime
 
 from langchain_openrouter import ChatOpenRouter
-import wave, io, os, base64, time, httpx, uuid, json
+import wave, io, os, base64, time, frontmatter, uuid, json
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import List, Optional, Literal
 from openrouter import OpenRouter, utils
 from datetime import date
 from ..self_evolution import convert_to_skill
-from ..agents.persona_identity.utils import SkillLoadingTools
 
 load_dotenv()
 
 from .state import AuditorState
+
+class SkillLoadingTools:
+
+    def load_skill(skill_name: str, skill_path: str) -> str:
+        "Load the content of the specific skill"
+        try:
+            post = frontmatter.load(f"{skill_path}/{skill_name}.md")
+        except:
+            return f"{skill_name} cannot be retrieved!"
+        return post.content
+
+    def load_skill_names(skill_path: str) -> List[dict] | str:
+        "Load the name and descriptions of the available skills"
+        os.makedirs(skill_path, exist_ok=True)
+        all_skills = list(Path(skill_path).glob("*.md"))
+        if all_skills:
+            all_metadata = []
+            for skill in all_skills:
+                post = frontmatter.load(skill)
+                all_metadata.append(post.metadata)
+            return all_metadata
+        else:
+            return "No skills available yet!"
 
 class AgentTools:
 

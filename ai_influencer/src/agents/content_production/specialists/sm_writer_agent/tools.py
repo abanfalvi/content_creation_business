@@ -391,18 +391,15 @@ class AgentTools:
 
     @tool
     def append_content(content: str, runtime: ToolRuntime[None, ContentCreatorState]) -> str:
-        "Append new content to the end of the influencer's CAPTION.md file. Add your caption content after 'Caption text: ' "
+        "Append new content to the end of the influencer's CAPTION.md file."
         influencer_name = runtime.state.get("influencer_name")
         influencer_folder = f"src/influencers/{influencer_name}/social_contents"
-        pattern = r"Caption text: (.*)- Media type:"
-        match = re.search(pattern, content, flags=re.DOTALL)
-        if match:
-            update_calendar(
-                influencer_name,
-                "append",
-                runtime.state.get("content_id"),
-                caption_text=match.group(1)
-            )
+        update_calendar(
+            influencer_name,
+            "append",
+            runtime.state.get("content_id"),
+            caption_text=content
+        )
         return FileEditingTools.append_filecontent(content, filepath=f"{influencer_folder}/CAPTION.md")
 
     @tool

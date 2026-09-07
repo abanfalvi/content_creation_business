@@ -10,9 +10,8 @@ from openrouter import OpenRouter, utils
 from pydantic import BaseModel, Field
 from datetime import date
 
-from ..agents.persona_identity.persona_workflow import persona_gen_workflow
-from ..agents.content_production.manager import get_content_manager_agent
-from ..agents.engagement_community.specialist_agent import response_engagement_agent
+from ..cli.task_scheduler import set_daily_schedule, get_schedule_status, delete_schedule
+from ..agents.utils import sum_usage, log_token_usage
 
 load_dotenv()
 
@@ -68,6 +67,8 @@ class AgentTools:
             A Command updating the orchestrator's state with the new influencer's
             `influencer_name` and `voice_name` once the workflow completes.
         """
+        from ..agents.persona_identity.persona_workflow import persona_gen_workflow
+
         thread_id, config = _persona_workflow_thread(runtime)
 
         if persona_gen_workflow.get_state(config).next:
@@ -89,6 +90,12 @@ class AgentTools:
                 writer(data) # {"node": "agent_node_name"} relayed straight up, unchanged
             elif mode == "values":
                 persona_workflow = data
+
+        # Token usage for this workflow is logged per specialist inside
+        # persona_workflow.py itself (call_specialist_agent, gen_image_node,
+        # call_review_router_node) — PersonaWorkflowState carries no `messages`
+        # of its own to diff here; the actual LLM calls happen one level down,
+        # each on its own separate checkpointed thread.
 
         summary = _summarize_persona_result(
             persona_workflow, "The persona draft is ready for human review before it can be finalized."
@@ -118,6 +125,8 @@ class AgentTools:
             A Command updating the orchestrator's state once the workflow finalizes, or another
             round of review details if the revision itself needs re-approval.
         """
+        from ..agents.persona_identity.persona_workflow import persona_gen_workflow
+
         thread_id, config = _persona_workflow_thread(runtime)
 
         if not persona_gen_workflow.get_state(config).next:
@@ -169,17 +178,22 @@ class AgentTools:
         Returns:
             The content manager's reported result for this task.
         """
+        from ..agents.content_production.manager import get_content_manager_agent
+
         thread_id = runtime.config["configurable"]["thread_id"]
+        content_manager_thread_id = f"{thread_id}:content_manager_agent"
+        content_manager_agent = await get_content_manager_agent()
+        snapshot = await content_manager_agent.aget_state({"configurable": {"thread_id": content_manager_thread_id}})
+        before_count = len(snapshot.values.get("messages", [])) if snapshot.values else 0
         writer = runtime.stream_writer
         result = {}
-        content_manager_agent = await get_content_manager_agent()
         async for mode, data in content_manager_agent.astream({
                 "messages": instruction,
                 "influencer_name": runtime.state.get("influencer_name"),
                 "voice_name": runtime.state.get("voice_name"),
                 "active_step": "content_creation",
             },
-            config={"configurable": {"thread_id": f"{thread_id}:content_manager_agent"}},
+            config={"configurable": {"thread_id": content_manager_thread_id}},
             stream_mode=["values", "custom"]):
 
             if mode == "custom":
@@ -187,19 +201,73 @@ class AgentTools:
             elif mode == "values":
                 result = data
 
+        turn_usage = sum_usage(result["messages"][before_count:])
+        log_token_usage(
+            "content_production",
+            "content_manager",
+            content_manager_thread_id,
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
+        )
         return result["messages"][-1].content
 
     @tool
     def call_response_engagement_agent(instruction: str, runtime: ToolRuntime[None, OrchestratorState]) -> str:
         "Delegate to the Engagement & Community department for the currently active influencer to get insights into how her content is performing online (e.g. recent media/Threads performance, engagement metrics). This only surfaces insights — it cannot be used to reply to audience comments, which is handled by a separate automated flow. `instruction` must state the concrete request. Requires an active influencer."
+        from ..agents.engagement_community.specialist_agent import response_engagement_agent
+
         thread_id = runtime.config["configurable"]["thread_id"]
+        config = {"configurable": {"thread_id": thread_id}}
+        before_count = len(response_engagement_agent.get_state(config).values.get("messages", []))
         result = response_engagement_agent.invoke({
                 "messages": instruction,
                 "influencer_name": runtime.state.get("influencer_name"),
                 "active_step": "get_insights",
             }, config={"configurable": {"thread_id": f"{thread_id}:response_engagement_agent"}})
 
+        turn_usage = sum_usage(result["messages"][before_count:])
+        log_token_usage(
+            "engagement_community",
+            "engagement_specialist",
+            f"{thread_id}:response_engagement_agent",
+            turn_usage.input_tokens,
+            turn_usage.output_tokens
+        )
+        
         return result["messages"][-1].content
+
+    @tool
+    def manage_content_schedule(action: Literal["set", "status", "remove"], runtime: ToolRuntime[None, OrchestratorState], time: str = "") -> str:
+        """Manage the OS-level daily schedule that runs content production unattended.
+
+        This controls whether/when the agency automatically produces and publishes
+        content once a day without anyone instructing you to — it does not itself
+        produce content. Use "status" to check what's currently scheduled before
+        assuming none exists. Confirm with the user before "remove", the same way
+        you'd confirm before overwriting an active influencer — turning off automatic
+        posting is easy to do accidentally and not obviously reversible from the
+        user's side without asking you again.
+
+        Args:
+            action: "set" to create or change the daily run time, "status" to report
+                the current schedule, "remove" to turn off automatic posting.
+            time: Required when action is "set" — 24-hour "HH:MM" (e.g. "14:30" for
+                2:30 PM). Ignored for "status" and "remove".
+
+        Returns:
+            A human-readable confirmation or status string to relay to the user.
+        """
+        if action == "set":
+            if not time:
+                return 'A time is required to set the schedule (24-hour "HH:MM", e.g. "14:30").'
+            try:
+                return set_daily_schedule(time)
+            except ValueError as exc:
+                return str(exc)
+        elif action == "status":
+            return get_schedule_status()
+        else:
+            return delete_schedule()
 
     @tool
     def read_persona_info(identity: Literal["CHARACTER", "PERSONALITY", "BACKSTORY"], runtime: ToolRuntime[None, OrchestratorState]) -> str:

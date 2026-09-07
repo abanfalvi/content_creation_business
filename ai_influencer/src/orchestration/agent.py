@@ -37,7 +37,8 @@ all_tools = [
     AgentTools.run_persona_creation_workflow,
     AgentTools.submit_persona_review,
     AgentTools.read_persona_info,
-    AgentTools.call_response_engagement_agent
+    AgentTools.call_response_engagement_agent,
+    AgentTools.manage_content_schedule,
 ]
 
 async def build_orchestrator():

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 
-from .specialist_agent import response_handling_agent
+from src.agents.engagement_community.specialist_agent import response_engagement_agent
 
 load_dotenv()
 
@@ -54,7 +54,7 @@ def _handle_change(influencer_name: str, platform: str, change: dict) -> None:
         "and reply appropriately. If there's nothing actionable here, say so briefly and do nothing."
     )
     try:
-        response_handling_agent.invoke(
+        response_engagement_agent.invoke(
             {"messages": [("user", task)], "influencer_name": influencer_name, "active_step": "answer_comments"},
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -99,4 +99,4 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)

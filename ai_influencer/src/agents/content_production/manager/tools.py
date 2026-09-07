@@ -12,6 +12,7 @@ from ..specialists.content_strategist_agent.agent import content_strategist_agen
 from ..specialists.sm_writer_agent.agent import sm_content_writer_agent
 from ....auditor.agent import auditor_agent
 from ....auditor.tools import AgentTools
+from ....agents.utils import sum_usage, log_token_usage
 
 _calendar_lock = threading.Lock()
 
@@ -23,10 +24,14 @@ class ManagerTools:
         "Delegate to the Content Strategist Agent to plan, review, or update the influencer's content calendar (CALENDAR.json). `prompt` must state the concrete planning task (e.g. the window to plan, or the entry to revise), not a generic instruction."
         runtime.stream_writer({"step": "call_content_strategist_agent"})
         thread_id = runtime.config["configurable"]["thread_id"]
+        config = {"configurable": {"thread_id": f"{thread_id}:content_strategist_agent"}}
+        before_count = len(content_strategist_agent.get_state(config).values.get("messages", []))
         result = content_strategist_agent.invoke(
             {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name")},
-            config={"configurable": {"thread_id": f"{thread_id}:content_strategist_agent"}},
+            config=config,
         )
+        turn_usage = sum_usage(result["messages"][before_count:])
+        log_token_usage("content_production", "content_strategist_agent", config["configurable"]["thread_id"], turn_usage.input_tokens, turn_usage.output_tokens)
         return result["messages"][-1].content
 
     @tool
@@ -34,10 +39,14 @@ class ManagerTools:
         "Delegate to the Social Media Content Writer Agent to produce one piece of content (image/video + caption). `prompt` must name the specific calendar entry or idea to execute, not a generic instruction. Also add the content id in your instruction. The produced asset URL(s) are recorded onto that calendar entry automatically — call `read_content_calendar` afterward to retrieve them (e.g. before publishing via Buffer), rather than expecting them in this tool's result."
         runtime.stream_writer({"step": "call_sm_content_writer_agent"})
         thread_id = runtime.config["configurable"]["thread_id"]
+        config = {"configurable": {"thread_id": f"{thread_id}:sm_content_writer_agent"}}
+        before_count = len(sm_content_writer_agent.get_state(config).values.get("messages", []))
         result = sm_content_writer_agent.invoke(
             {"messages": prompt.model_dump_json(), "influencer_name": runtime.state.get("influencer_name"), "voice_name": runtime.state.get("voice_name"), "content_id": content_id},
-            config={"configurable": {"thread_id": f"{thread_id}:sm_content_writer_agent"}},
+            config=config,
         )
+        turn_usage = sum_usage(result["messages"][before_count:])
+        log_token_usage("content_production", "sm_content_writer_agent", config["configurable"]["thread_id"], turn_usage.input_tokens, turn_usage.output_tokens)
 
         return Command(
             update={
@@ -120,6 +129,11 @@ class ManagerTools:
                 "department_name": "content_production",
                 "active_step": "save_traces"
             })
+            # auditor_agent has no checkpointer (see auditor/agent.py) — each
+            # .invoke() call is stateless, so its full result already is this
+            # call's usage, with nothing prior to slice off.
+            turn_usage = sum_usage(result["messages"])
+            log_token_usage("content_production", "auditor", agent_thread_id, turn_usage.input_tokens, turn_usage.output_tokens)
             all_traces[name] = result["messages"][-1].content
 
         return all_traces
