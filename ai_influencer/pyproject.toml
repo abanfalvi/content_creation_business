@@ -2,7 +2,7 @@
 name = "ai-influencer-agency"
 version = "0.1.0"
 description = "Agent agency that designs, launches, and produces content for AI-generated influencer personas."
-readme = "assets/PROJECT.md"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiosqlite==0.22.1",
