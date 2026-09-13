@@ -1,0 +1,26 @@
+{
+  "name": "niche_newsletter",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.11",
+    "@langchain/openrouter": "^0.4.13",
+    "@langchain/tavily": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "langchain": "^1.5.11",
+    "opik-langchain": "^2.2.59"
+  }
+}
