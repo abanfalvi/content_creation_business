@@ -7,8 +7,8 @@ import {
     createMiddleware,
     modelFallbackMiddleware,
     toolRetryMiddleware,
+    modelRetryMiddleware,
     dynamicSystemPromptMiddleware,
-    todoListMiddleware,
     countTokensApproximately,
     toolErrorMiddleware,
     type AnyAgentMiddleware,
@@ -86,7 +86,7 @@ const compressGateMiddleware = createMiddleware({
         request.state.iterationCount >= 3 &&
         promptLength >= 40000 &&
         request.state.summaryCount < 1 &&
-        request.state.probeCount >= 2;
+        request.state.probeCount >= 4;
 
     const tools = shouldExposeCompression
         ? request.tools
@@ -100,25 +100,6 @@ const compressGateMiddleware = createMiddleware({
   },
 });
 
-const RESEARCH_TODO_DESCRIPTION = `Use this tool to plan and track the steps of your current research task.
-
-Only use it when the research is non-trivial — several distinct leads to chase, a query broad enough to need breaking into sub-questions, or a task you expect to span many search rounds. For a quick, narrow lookup that resolves in a couple of searches, skip it and just do the work directly.
-
-## When to use it
-1. Breaking a broad research query into concrete sub-questions or angles to investigate separately.
-2. Tracking which leads/sources you've already checked versus what's still open, so you don't repeat searches.
-3. Planning follow-up steps that depend on what an earlier search turns up (e.g. "if X confirms this, check Y next").
-4. Keeping track of what still needs a practical-application angle written up, versus what's just a raw fact so far.
-
-## How to use it
-1. Mark a step in_progress before starting it, and completed as soon as it's done — don't batch updates.
-2. Revise the list as you go: drop steps that turn out irrelevant, add new ones a search surfaces (a new sub-topic, a source worth cross-checking).
-3. Keep steps concrete and scoped to this research task ("check if Model X's release notes mention fine-tuning support") — not vague ("do more research").
-
-## When NOT to use it
-- A single, narrow question answerable in one or two searches.
-- Purely reading back or editing your scratch pad notes — that's not a planning step.`;
-
 // toolRetryMiddleware's internal Zod schema isn't typed for exactOptionalPropertyTypes; cast is a library-typing gap, not a logic issue
 const searchRetryMiddleware = toolRetryMiddleware({
   tools: ["web_search"],
@@ -129,13 +110,25 @@ const searchRetryMiddleware = toolRetryMiddleware({
   onFailure: "continue",
 }) as AnyAgentMiddleware;
 
+const modelCallRetryMiddleware = modelRetryMiddleware({
+  maxRetries: 3,
+  retryOn: (error) =>
+    error.message === "terminated" ||
+    error.name === "TimeoutError" ||
+    error.name === "NetworkError" ||
+    error instanceof TypeError,
+  backoffFactor: 1.5,
+  initialDelayMs: 1000,
+  onFailure: "continue",
+}) as AnyAgentMiddleware;
+
 
 export const researchAgent = createAgent({
     model: researchModel,
     tools: researchTools,
     middleware: [
-        compressGateMiddleware, 
-        todoListMiddleware({ toolDescription: RESEARCH_TODO_DESCRIPTION }) as AnyAgentMiddleware,
+        compressGateMiddleware,
+        modelCallRetryMiddleware,
         searchRetryMiddleware,
         toolErrorMiddleware({onError: onRetry})
     ],

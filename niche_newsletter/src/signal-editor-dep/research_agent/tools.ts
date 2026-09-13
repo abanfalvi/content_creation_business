@@ -51,7 +51,12 @@ async function summarizeMessages(messagesToSummarize: BaseMessage[], config?: Ru
 
 const webSearchTool = tool(
   async ({ query, maxResults, includeDomains }) => {
-    const searchTool = new TavilySearch({maxResults: maxResults, searchDepth: "basic", includeDomains: includeDomains});
+    const searchTool = new TavilySearch({
+      maxResults: maxResults,
+      searchDepth: "basic",
+      includeDomains: includeDomains,
+      // ...(includeRawContent ? { includeRawContent } : {}),
+    });
     // TavilySearch's schema is built on zod/v3, which TS can't cross-check cleanly against this file's zod v4 imports;
     // the object shape below is correct per TavilySearch's own documented usage.
     const results = await searchTool.invoke({ query } as unknown as Parameters<typeof searchTool.invoke>[0]);
@@ -63,8 +68,9 @@ const webSearchTool = tool(
     schema: z.object({
       query: z.string().describe("the search query"),
       maxResults: z.number().optional().default(5).describe("max number of results to return"),
-      includeDomains: z.array(z.string()).optional().default([]).describe("List of domains/sites to include in the search results")
-      // searchDepth: z.enum(["basic", "advanced"]).default("basic").describe("depth of search, advanced costs more, but gives more thorough results")
+      includeDomains: z.array(z.string()).optional().default([]).describe("List of domains/sites to include in the search results"),
+      // searchDepth: z.enum(["basic", "advanced"]).default("basic").describe("depth of search, advanced costs more, but gives more thorough results"),
+      // includeRawContent: z.enum(["markdown", "text"]).optional().describe("Set this to also get each result's full cleaned page content (not just a short excerpt). Costs more latency and tokens — only ask for it when the default excerpt isn't enough to confirm a finding or write up its practical application.")
     }),
   }
 );
@@ -201,5 +207,67 @@ const addContent = tool(
   }
 );
 
+const TODO_STATUS = z.enum(["pending", "in_progress", "completed"]);
 
-export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent];
+const TodoSchema = z.object({
+  content: z.string().describe("A concrete, scoped research step, e.g. \"check if Model X's release notes mention fine-tuning support\" — not vague like \"do more research\"."),
+  status: TODO_STATUS.describe("Current status of this step."),
+});
+
+const WRITE_TODOS_DESCRIPTION = `Use this tool to plan and track the steps of your current research task.
+
+Only use it when the research is non-trivial — several distinct leads to chase, a query broad enough to need breaking into sub-questions, or a task you expect to span many search rounds. For a quick, narrow lookup that resolves in a couple of searches, skip it and just do the work directly.
+
+This tool REPLACES the entire todo list with what you pass in — always include every step (not just the ones that changed), or earlier steps will be lost. Read the list first with read_todos if you're not sure what's already on it.
+
+## When to use it
+1. Breaking a broad research query into concrete sub-questions or angles to investigate separately.
+2. Tracking which leads/sources you've already checked versus what's still open, so you don't repeat searches.
+3. Planning follow-up steps that depend on what an earlier search turns up (e.g. "if X confirms this, check Y next").
+4. Keeping track of what still needs a practical-application angle written up, versus what's just a raw fact so far.
+
+## How to use it
+1. Mark a step in_progress before starting it, and completed as soon as it's done — don't batch updates.
+2. Revise the list as you go: drop steps that turn out irrelevant, add new ones a search surfaces (a new sub-topic, a source worth cross-checking).
+3. Keep steps concrete and scoped to this research task — not vague.
+
+## When NOT to use it
+- A single, narrow question answerable in one or two searches.
+- Purely reading back or editing your scratch pad notes — that's not a planning step.`;
+
+const readTodos = tool(
+  async () => {
+    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    await mkdir(path, { recursive: true });
+    const fullPath = join(path, "todos.json");
+    try {
+      const content = await readFile(fullPath, 'utf-8');
+      return content;
+    } catch {
+      await writeFile(fullPath, "[]", 'utf-8');
+      return "[]";
+    }
+  }, {
+    name: "read_todos",
+    description: "Read your current research todo list.",
+  }
+);
+
+const writeTodos = tool(
+  async ({ todos }) => {
+    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    await mkdir(path, { recursive: true });
+    const fullPath = join(path, "todos.json");
+    await writeFile(fullPath, JSON.stringify(todos, null, 2), 'utf-8');
+
+    return `Updated todo list to ${JSON.stringify(todos)}`;
+  }, {
+    name: "write_todos",
+    description: WRITE_TODOS_DESCRIPTION,
+    schema: z.object({
+      todos: z.array(TodoSchema).describe("The full todo list — this replaces whatever was there before, so include every step, not just the changed ones."),
+    }),
+  }
+);
+
+export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos];
