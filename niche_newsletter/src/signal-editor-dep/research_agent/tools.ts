@@ -17,6 +17,56 @@ dotenv.config();
 
 const MIN_HISTORY_TO_COMPRESS = 6; // below this many older messages, compression isn't worth the summarization call
 
+// Normalize CRLF to LF so a to_replace written with \n still matches a Windows-line-ended file.
+const normalizeNewlines = (s: string) => s.replace(/\r\n/g, "\n");
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Any of these count as "the same quote" for matching purposes — scraped web content
+// commonly uses curly/smart quotes where a model writes straight ones, or vice versa.
+const SINGLE_QUOTES = `'‘’‚‛`;
+const DOUBLE_QUOTES = `"“”„‟`;
+const SINGLE_QUOTE_CLASS = `[${SINGLE_QUOTES}]`;
+const DOUBLE_QUOTE_CLASS = `[${DOUBLE_QUOTES}]`;
+
+// Collapses runs of whitespace in the target into `\s+`, and any quote character into
+// a class matching all straight/curly variants, so indentation/line-break differences
+// and quote-style mismatches between what the model wrote and the file's actual
+// content don't block an otherwise-correct match.
+const buildFlexiblePattern = (s: string) =>
+    new RegExp(
+        escapeRegExp(s)
+            .replace(new RegExp(`[${SINGLE_QUOTES}]`, "g"), SINGLE_QUOTE_CLASS)
+            .replace(new RegExp(`[${DOUBLE_QUOTES}]`, "g"), DOUBLE_QUOTE_CLASS)
+            .replace(/\s+/g, "\\s+"),
+        "g"
+    );
+
+// Tries an exact substring match first (fast, unambiguous); if that finds nothing,
+// falls back to a whitespace-tolerant regex match before giving up.
+function findAndReplace(content: string, to_replace: string, replace_with: string):
+    | { status: "ok"; result: string }
+    | { status: "not_found" }
+    | { status: "ambiguous"; count: number } {
+    const exactCount = content.split(to_replace).length - 1;
+    if (exactCount === 1) {
+        return { status: "ok", result: content.replaceAll(to_replace, replace_with) };
+    }
+    if (exactCount > 1) {
+        return { status: "ambiguous", count: exactCount };
+    }
+
+    const flexiblePattern = buildFlexiblePattern(to_replace);
+    const flexCount = content.match(flexiblePattern)?.length ?? 0;
+    if (flexCount === 0) {
+        return { status: "not_found" };
+    }
+    if (flexCount > 1) {
+        return { status: "ambiguous", count: flexCount };
+    }
+    return { status: "ok", result: content.replace(flexiblePattern, replace_with) };
+}
+
 const compressionModel = new ChatOpenRouter(MODELS.MEMORY_MANAGEMENT_MODEL, { temperature: 0.2, callbacks: [opikHandler] });
 
 const COMPRESSION_PROMPT = `You are compressing the working conversation history of a research agent gathering source material for a newsletter, so it can keep going without losing track of what's already been found or decided.
@@ -133,12 +183,11 @@ const compressContext = tool(
 );
 
 const readScratchPad = tool(
-    async () => {
-        const today = new Date();
-        const isoDate = today.toISOString().slice(0,10);
+    async (_input, runtime: ToolRuntime<typeof ResearchAgentState>) => {
+        const researchTopic = runtime.state.researchTopic;
         const path = "src/signal-editor-dep/research_agent/scratch_pad/";
         await mkdir(path, {recursive: true});
-        const fullPath = join(path, `${isoDate}_notes.md`);
+        const fullPath = join(path, `${researchTopic}_notes.md`);
         try {
             const content = await readFile(fullPath, 'utf-8');
             return content
@@ -154,30 +203,31 @@ const readScratchPad = tool(
 )
 
 const editScratchPad = tool(
-  async ({ to_replace, replace_with }) => {
-    const today = new Date();
-    const isoDate = today.toISOString().slice(0, 10);
+  async ({ to_replace, replace_with }, runtime: ToolRuntime<typeof ResearchAgentState>) => {
+    const researchTopic = runtime.state.researchTopic;
     const path = "src/signal-editor-dep/research_agent/scratch_pad/";
     await mkdir(path, { recursive: true });
-    const fullPath = join(path, `${isoDate}_notes.md`);
+    const fullPath = join(path, `${researchTopic}_notes.md`);
 
     try {
-        var content = await readFile(fullPath, 'utf-8');
+        var content = normalizeNewlines(await readFile(fullPath, 'utf-8'));
     } catch {
         await writeFile(fullPath, " ", 'utf-8');
-        var content = await readFile(fullPath, 'utf-8');
+        var content = normalizeNewlines(await readFile(fullPath, 'utf-8'));
     }
-    const count = content.split(to_replace).length - 1;
-    if (count === 0) {
-        return `"${to_replace}" not found in file.`;
-    }
-    if (count > 1) {
-        return `"${to_replace}" found ${count} times — expected exactly one match, aborting edit.`;
-    }
-    const updatedContent = content.replaceAll(to_replace, replace_with);
-    await writeFile(fullPath, updatedContent, 'utf-8');
+    const to_replace_normalized = normalizeNewlines(to_replace);
+    const replace_with_normalized = normalizeNewlines(replace_with);
 
-    return updatedContent;
+    const outcome = findAndReplace(content, to_replace_normalized, replace_with_normalized);
+    if (outcome.status === "not_found") {
+        return `"${to_replace}" not found in file (checked exact and whitespace-flexible matches).`;
+    }
+    if (outcome.status === "ambiguous") {
+        return `"${to_replace}" found ${outcome.count} times — expected exactly one match, aborting edit.`;
+    }
+    await writeFile(fullPath, outcome.result, 'utf-8');
+
+    return outcome.result;
   }, {
     name: "edit_scratchpad",
     description: "Edit the content of your notes about the research findings",
@@ -189,12 +239,11 @@ const editScratchPad = tool(
 );
 
 const addContent = tool(
-  async ({ content }) => {
-    const today = new Date();
-    const isoDate = today.toISOString().slice(0, 10);
+  async ({ content }, runtime: ToolRuntime<typeof ResearchAgentState>) => {
+    const researchTopic = runtime.state.researchTopic;
     const path = "src/signal-editor-dep/research_agent/scratch_pad/";
     await mkdir(path, { recursive: true });
-    const fullPath = join(path, `${isoDate}_notes.md`);
+    const fullPath = join(path, `${researchTopic}_notes.md`);
     await appendFile(fullPath, content, 'utf-8');
 
     return "Your notes have been added";

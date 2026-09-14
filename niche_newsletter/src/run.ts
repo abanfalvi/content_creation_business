@@ -1,11 +1,13 @@
 import { researchAgent } from "./signal-editor-dep/research_agent/agent.js";
+import { relFilterAgent } from "./signal-editor-dep/rel_filter_agent/agent.js";
 import {opikHandler} from "./models.js";
 import {HumanMessage} from "@langchain/core/messages";
 
 try {
-    const result = await researchAgent.invoke(
+    const result = await relFilterAgent.invoke(
         {
-            messages: [new HumanMessage(`Collect the most recommended AI automation techniques for marketers. Current date: ${new Date().toDateString()}`)],
+            messages: [new HumanMessage(`Trim what is relevant from the research findings. Current research topic: AI marketing automation techniques. Current date: ${new Date().toDateString()}`)],
+            researchTopic: "ai_marketing_automation"
         },
         { callbacks: [opikHandler], recursionLimit: 100 }
     );
