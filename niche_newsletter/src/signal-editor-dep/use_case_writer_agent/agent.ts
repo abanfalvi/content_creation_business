@@ -1,11 +1,11 @@
 import { MODELS } from "../../models.js";
-import { RelFilterAgentState } from "./state.js";
-import { filteringTools } from "./tools.js";
+import { UseCaseWriterAgentState } from "./state.js";
+import { useCaseWriterTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
 
 import {
     createAgent,
-    createMiddleware,
+    toolCallLimitMiddleware,
     modelFallbackMiddleware,
     modelRetryMiddleware,
     dynamicSystemPromptMiddleware,
@@ -25,14 +25,14 @@ async function readConfig(path: string): Promise<string> {
   return content;
 }
 
-const relFilterModel = new ChatOpenRouter({
-    model: MODELS.RELEVANCE_FILTER_AGENT,
+const userCaseWriterModel = new ChatOpenRouter({
+    model: MODELS.USE_CASE_WRITER_AGENT,
     temperature: .2,
     maxTokens: 4096,
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/rel_filter_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/use_case_writer_agent/SYSTEM_PROMPT.md")
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -46,14 +46,20 @@ const modelCallRetryMiddleware = modelRetryMiddleware({
   onFailure: "continue",
 }) as AnyAgentMiddleware;
 
+const searchVideosLimitMiddleware = toolCallLimitMiddleware({
+  toolName: "search_videos",
+  runLimit: 7,
+  exitBehavior: "continue",
+} as never) as AnyAgentMiddleware;
 
-export const relFilterAgent = createAgent({
-    model: relFilterModel,
-    tools: filteringTools,
+export const userCaseWriterAgent = createAgent({
+    model: userCaseWriterModel,
+    tools: useCaseWriterTools,
     middleware: [
         modelCallRetryMiddleware,
-        toolErrorMiddleware({onError: onRetry})
+        toolErrorMiddleware({onError: onRetry}),
+        searchVideosLimitMiddleware
     ],
     systemPrompt: SYSTEM_PROMPT,
-    stateSchema: RelFilterAgentState,
-})
+    stateSchema: UseCaseWriterAgentState,
+});
