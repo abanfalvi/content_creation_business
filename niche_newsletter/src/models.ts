@@ -8,6 +8,7 @@ export const MODELS = {
     RELEVANCE_FILTER_AGENT: "inclusionai/ling-3.0-flash",
     RESEARCH_AGENT: "nex-agi/nex-n2.5-mini:free",
     USE_CASE_WRITER_AGENT: "nex-agi/nex-n2.5-mini:free",
+    IMAGE_GENERATION_MODEL: "meta/muse-image",
 
     DISTRIBUTION_MANAGER: "deepseek/deepseek-v4-flash-0731",
     USER_OUTREACH_AGENT: "nex-agi/nex-n2.5-pro:free",

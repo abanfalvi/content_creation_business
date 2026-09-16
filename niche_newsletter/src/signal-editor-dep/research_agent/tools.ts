@@ -1,6 +1,6 @@
 import { string, z } from "zod";
-import { tool, type ToolRuntime } from "@langchain/core/tools";
-import { TavilySearch } from "@langchain/tavily";
+import { tool, type ClientTool, type ToolRuntime } from "@langchain/core/tools";
+import { TavilySearch, TavilyExtract } from "@langchain/tavily";
 import { join } from 'path';
 import { BaseMessage, getBufferString, HumanMessage, RemoveMessage, ToolMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -241,4 +241,6 @@ const writeTodos = tool(
   }
 );
 
-export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos];
+const tavilyExtractTool = new TavilyExtract() as ClientTool;
+
+export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, tavilyExtractTool];

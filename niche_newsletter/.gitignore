@@ -36,3 +36,6 @@ assets/PROJECT.md
 assets/RESEARCH_REPORT.md
 src/signal-editor-dep/research_agent/scratch_pad
 src/signal-editor-dep/use_case_writer_agent/scratch_pad
+src/signal-editor-dep/editor_agent/charts
+src/signal-editor-dep/editor_agent/.auth
+.beehiiv-*
