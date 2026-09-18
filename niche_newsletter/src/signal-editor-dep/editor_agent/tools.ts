@@ -16,7 +16,8 @@ import { Dropbox, DropboxResponseError } from 'dropbox';
 import { EditorAgentState } from "./state.js";
 import { MODELS } from "../../models.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
-import { getBeehiivMCP, getNotionMCP } from "./mcp.js"
+import { getBeehiivMCP } from "./mcp.js"
+import { getNotionMCP } from "../../shared/notion_mcp.js";
 
 // TS 7's nodenext resolution can't fully model this package's shape (conditional `exports`
 // map + a `.d.ts` with no `"type"` field to disambiguate CJS/ESM) and falls back to an

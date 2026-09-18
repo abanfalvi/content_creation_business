@@ -23,6 +23,7 @@
     "@langchain/tavily": "^1.2.0",
     "@openrouter/sdk": "^1.2.123",
     "@tavily/core": "^0.7.11",
+    "apify-client": "^2.25.0",
     "dotenv": "^17.4.2",
     "dropbox": "^10.46.0",
     "js-yaml": "^5.4.2",

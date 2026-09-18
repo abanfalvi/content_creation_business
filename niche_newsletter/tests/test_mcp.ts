@@ -67,4 +67,35 @@ async function getCanvaTools(): Promise<DynamicStructuredTool[]> {
     }
 };
 
-console.log(await getCanvaTools())
+async function getApifyTools(): Promise<DynamicStructuredTool[]> {
+
+    const apifyToken = process.env.APIFY_API_KEY;
+    if (!apifyToken) {
+        console.warn(
+            "No api key has been set for Apify tool"
+        );
+        return [];
+    }
+
+    const client = new MultiServerMCPClient({
+        buffer: {
+            transport: "http",
+            url: "https://mcp.apify.com/",
+            headers: {
+                Authorization: `Bearer ${apifyToken}`
+            },
+        },
+    });
+
+    try {
+        const tools = await client.getTools();
+        console.log(tools.map(tool => tool.name))
+        // return tools.filter(tool => KEEP_BUFFER_TOOLS.has(tool.name));
+        return [];
+    } catch (error) {
+        console.error("Failed to load apify MCP tools:", error);
+        return [];
+    }
+};
+
+console.log(await getApifyTools());

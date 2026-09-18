@@ -33,10 +33,12 @@ coverage/
 
 # Project outline
 assets/PROJECT.md
+content_strategy/
 assets/RESEARCH_REPORT.md
 src/signal-editor-dep/research_agent/scratch_pad
 src/signal-editor-dep/use_case_writer_agent/scratch_pad
 src/signal-editor-dep/editor_agent/charts
 src/signal-editor-dep/editor_agent/.auth
 src/distribution-dep/sm_agent/.auth
+src/shared/.auth
 .beehiiv-*
