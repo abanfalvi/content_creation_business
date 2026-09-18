@@ -13,6 +13,20 @@ import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../.
 const SCRATCH_PAD_DIR = "src/signal-editor-dep/use_case_writer_agent/scratch_pad/";
 const RESEARCH_SCRATCH_PAD_DIR = "src/signal-editor-dep/research_agent/scratch_pad/";
 
+const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
+
+type YoutubeSearchResponse = {
+    items: Array<{
+        id: { videoId: string };
+        snippet: {
+            title: string;
+            description: string;
+            channelTitle: string;
+            publishedAt: string;
+        };
+    }>;
+};
+
 const readResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof UseCaseWriterAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
@@ -40,7 +54,7 @@ const getVideoTranscript = tool(
         
             return `Saved transcript (${fullText.length} chars) to ${outPath}`
         } catch (error) {
-          return `Failed to fetch transcript: ${error}`
+            return `Failed to fetch transcript: ${error}`
         }
     }, {
         name: "get_video_transcript",
@@ -51,20 +65,6 @@ const getVideoTranscript = tool(
         })
     }
 )
-
-const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
-
-type YoutubeSearchResponse = {
-    items: Array<{
-        id: { videoId: string };
-        snippet: {
-            title: string;
-            description: string;
-            channelTitle: string;
-            publishedAt: string;
-        };
-    }>;
-};
 
 const searchVideos = tool(
     async ({ query, maxResults }) => {

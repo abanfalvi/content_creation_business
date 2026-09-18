@@ -6,14 +6,14 @@
 // Re-run only if the stored refresh token is later revoked or invalidated.
 
 import { runInteractiveOAuthSetup } from "../../../shared/mcp_oauth_setup.js";
-import { FileBackedOAuthProvider, BEEHIIV_MCP_URL, BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH } from "../mcp.js";
+import { FileBackedOAuthProvider, BEEHIIV_MCP_URL, BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH, EDITOR_AGENT_APP_NAME } from "../mcp.js";
 
 runInteractiveOAuthSetup({
     serverName: "beehiiv",
     mcpUrl: BEEHIIV_MCP_URL,
     redirectUrl: BEEHIIV_REDIRECT_URL,
     tokenStorePath: BEEHIIV_TOKEN_STORE_PATH,
-    provider: new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH),
+    provider: new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH, EDITOR_AGENT_APP_NAME),
 }).catch((error) => {
     console.error(error);
     process.exit(1);

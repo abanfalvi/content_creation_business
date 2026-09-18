@@ -1,13 +1,13 @@
 // Add Beehiiv and Notion MCP
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import type {
-    OAuthClientInformationMixed,
-    OAuthClientMetadata,
-    OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
-import { FileOAuthStore } from "../../shared/oauth_token_storage.js";
+import { FileBackedOAuthProvider } from "../../shared/mcp_oauth_provider.js";
+
+// Re-exported so the existing setup scripts (notion_oauth_setup.ts, beehiiv_oauth_setup.ts),
+// which import this from "../mcp.js", keep working unchanged.
+export { FileBackedOAuthProvider } from "../../shared/mcp_oauth_provider.js";
+
+export const EDITOR_AGENT_APP_NAME = "niche-newsletter-editor-agent";
 
 export const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 export const BEEHIIV_MCP_URL = "https://mcp.beehiiv.com/mcp";
@@ -38,8 +38,6 @@ const KEEP_NOTION_TOOLS = new Set([
     "notion-create-attachment",
     "notion-create-file-upload",
     "notion-download-attachment",
-    "notion-create-comment",
-    "notion-get-comments",
     "notion-create-folder",
     "notion-update-folder",
     "notion-search-skills",
@@ -49,7 +47,6 @@ const KEEP_NOTION_TOOLS = new Set([
 ]);
 
 const KEEP_BEEHIIV_TOOLS = new Set([
-    // Post authoring — the agent's actual job
     "edit_post",
     "edit_post_content",
     "edit_post_template",
@@ -88,70 +85,12 @@ const KEEP_BEEHIIV_TOOLS = new Set([
 
 // Both Notion's and beehiiv's hosted remote MCP servers are confirmed OAuth-only — a
 // static bearer token gets a 403 from Notion ("Endpoint unavailable") and an unauthorized
-// error from beehiiv, even with a valid beehiiv API key. This implements the MCP SDK's
-// OAuthClientProvider against a small local JSON file per server, so the interactive
-// authorization step (run once, by hand, via `notion_oauth_setup.ts` / `beehiiv_oauth_setup.ts`)
-// is reused across every unattended pipeline run afterward — `tokens()`/`saveTokens()` here
-// are read and silently refreshed by the SDK's `auth()` helper, no browser needed after
-// that first setup run.
-export class FileBackedOAuthProvider implements OAuthClientProvider {
-    private readonly store: FileOAuthStore<OAuthClientInformationMixed, OAuthTokens>;
-
-    constructor(
-        private readonly serverName: string,
-        readonly redirectUrl: string,
-        storagePath: string,
-    ) {
-        this.store = new FileOAuthStore(storagePath);
-    }
-
-    get clientMetadata(): OAuthClientMetadata {
-        return {
-            client_name: `niche-newsletter-editor-agent (${this.serverName})`,
-            redirect_uris: [this.redirectUrl],
-            grant_types: ["authorization_code", "refresh_token"],
-            response_types: ["code"],
-            token_endpoint_auth_method: "none",
-        };
-    }
-
-    clientInformation() {
-        return this.store.getClientInformation();
-    }
-
-    saveClientInformation(clientInformation: OAuthClientInformationMixed) {
-        return this.store.saveClientInformation(clientInformation);
-    }
-
-    tokens() {
-        return this.store.getTokens();
-    }
-
-    saveTokens(tokens: OAuthTokens) {
-        return this.store.saveTokens(tokens);
-    }
-
-    async codeVerifier(): Promise<string> {
-        const verifier = await this.store.getCodeVerifier();
-        if (!verifier) {
-            throw new Error(
-                `No PKCE code verifier saved for ${this.serverName} — run the one-time OAuth setup script first.`
-            );
-        }
-        return verifier;
-    }
-
-    saveCodeVerifier(codeVerifier: string) {
-        return this.store.saveCodeVerifier(codeVerifier);
-    }
-
-    // Only reached during the one-time interactive setup (notion_oauth_setup.ts) — an
-    // unattended pipeline run should always already have tokens saved, since getNotionMCP()
-    // below checks for that before ever constructing a client.
-    redirectToAuthorization(authorizationUrl: URL): void {
-        console.log(`Open this URL in a browser to authorize ${this.serverName}:\n${authorizationUrl.toString()}`);
-    }
-}
+// error from beehiiv, even with a valid beehiiv API key. FileBackedOAuthProvider (shared)
+// implements the MCP SDK's OAuthClientProvider against a small local JSON file per server,
+// so the interactive authorization step (run once, by hand, via `notion_oauth_setup.ts` /
+// `beehiiv_oauth_setup.ts`) is reused across every unattended pipeline run afterward —
+// `tokens()`/`saveTokens()` are read and silently refreshed by the SDK's `auth()` helper,
+// no browser needed after that first setup run.
 
 // Returns [] (rather than throwing) when the integration is unavailable — a missing
 // token, an unreachable server, or an auth failure degrades this agent to running
@@ -159,7 +98,7 @@ export class FileBackedOAuthProvider implements OAuthClientProvider {
 // out to be load-bearing for this agent's job rather than optional, swap the `return []`
 // in the catch (and the missing-token check) for a thrown error instead.
 export async function getNotionMCP(): Promise<DynamicStructuredTool[]> {
-    const authProvider = new FileBackedOAuthProvider("notion", NOTION_REDIRECT_URL, NOTION_TOKEN_STORE_PATH);
+    const authProvider = new FileBackedOAuthProvider("notion", NOTION_REDIRECT_URL, NOTION_TOKEN_STORE_PATH, EDITOR_AGENT_APP_NAME);
 
     const savedTokens = await authProvider.tokens();
     if (!savedTokens) {
@@ -191,7 +130,7 @@ export async function getNotionMCP(): Promise<DynamicStructuredTool[]> {
 // Mirrors getNotionMCP() above — see the comment on FileBackedOAuthProvider for the
 // reasoning (graceful [] on missing tokens or a failed connection, rather than throwing).
 export async function getBeehiivMCP(): Promise<DynamicStructuredTool[]> {
-    const authProvider = new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH);
+    const authProvider = new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH, EDITOR_AGENT_APP_NAME);
 
     const savedTokens = await authProvider.tokens();
     if (!savedTokens) {

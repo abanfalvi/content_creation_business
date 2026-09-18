@@ -1,6 +1,6 @@
 import { MODELS } from "../../models.js";
-import { EditorAgentState } from "./state.js";
-import { editorTools } from "./tools.js";
+import { SMAgentState, type AgentStateType } from "./state.js";
+import { SMTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
 
 import {
@@ -28,14 +28,14 @@ async function readConfig(path: string): Promise<string> {
   return content;
 }
 
-const editorModel = new ChatOpenRouter({
-    model: MODELS.EDITOR_AGENT,
+const SMModel = new ChatOpenRouter({
+    model: MODELS.SM_AGENT,
     temperature: .2,
     maxTokens: 4096,
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/editor_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/distribution-dep/sm_agent/SYSTEM_PROMPT.md")
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -49,12 +49,22 @@ const modelCallRetryMiddleware = modelRetryMiddleware({
   onFailure: "continue",
 }) as AnyAgentMiddleware;
 
-const notionUsersPiiGuard = createMiddleware({
+const toolsConfig = createMiddleware({
+  name: "apply_tool_config",
+  stateSchema: SMAgentState.pick({loadedTools: true}),
+
+  // wrapModelCall: async (request, handler) => {
+  //   const availableTools = request.state.loadedTools
+  //   return await handler({...request, tools: availableTools})
+  // },
+});
+
+const bufferUserPiiGuard = createMiddleware({
   name: "userPiiGuardMiddleware",
 
   wrapToolCall: async (request, handler) => {
     const result = await handler(request);
-    if (request.toolCall.name !== "notion-get-users" || !(result instanceof ToolMessage)) {
+    if (request.toolCall.name !== "get_account" || !(result instanceof ToolMessage)) {
       return result;
     }
     const content = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
@@ -63,14 +73,15 @@ const notionUsersPiiGuard = createMiddleware({
   },
 });
 
-export const editorAgent = createAgent({
-    model: editorModel,
-    tools: editorTools,
+export const SMAgent = createAgent({
+    model: SMModel,
+    tools: SMTools,
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
-        notionUsersPiiGuard
+        bufferUserPiiGuard,
+        // toolsConfig
     ],
     systemPrompt: SYSTEM_PROMPT,
-    stateSchema: EditorAgentState,
+    stateSchema: SMAgentState,
 });
