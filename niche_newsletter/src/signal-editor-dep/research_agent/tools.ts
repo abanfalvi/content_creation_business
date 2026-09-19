@@ -1,7 +1,9 @@
-import { string, z } from "zod";
+import { z } from "zod";
 import { tool, type ClientTool, type ToolRuntime } from "@langchain/core/tools";
+import { createAgent } from "langchain";
 import { TavilySearch, TavilyExtract } from "@langchain/tavily";
-import { join } from 'path';
+import { join, basename } from 'path';
+import { randomUUID } from 'node:crypto';
 import { BaseMessage, getBufferString, HumanMessage, RemoveMessage, ToolMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { Command, REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
@@ -10,6 +12,8 @@ import { MODELS, opikHandler } from "../../models.js";
 import { ResearchAgentState, compressRubric } from "./state.js";
 import type { RubricType } from "./state.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile, writeFileEnsuringDir } from "../../shared/file_utils.js";
+import matter from "gray-matter";
+import { glob } from "glob";
 
 import dotenv from 'dotenv';
 
@@ -241,6 +245,161 @@ const writeTodos = tool(
   }
 );
 
+const skimPreviousFindings = tool(
+  async () => {
+    const prevNotes = await glob("**/*_notes.md", { cwd: "src/signal-editor-dep/research_agent/scratch_pad", absolute: true });
+    const contents: Record<string, any> = {};
+    for (const note of prevNotes) {
+      const topicName = basename(note, "_notes.md");
+      const raw = await readOrInitFile(note);
+      const parsed = matter(raw);
+      contents[topicName] = parsed.data
+    }
+    return contents
+  }, {
+    name: "skim_previous_findings",
+    description: "Get the title and descriptions of the previous notes to decide if there any relevant that can be used."
+  });
+
+const readPreviousFinding = tool(
+  async ({notesTopic, sameTopic}, runtime: ToolRuntime) => {
+    const topic = notesTopic.toLowerCase().replace(" ", "_")
+    const fullPath = join("src/signal-editor-dep/research_agent/scratch_pad", `${topic}_notes.md`);
+    try {
+        var content = await readOrInitFile(fullPath);
+      } catch {
+        return "File not found, please use the topic names returned in the skimPreviousFindings tool"
+      }
+    if (!sameTopic) {
+      return content
+    } else {
+      return new Command({
+        update: {
+          messages: [
+            new ToolMessage({content: content, tool_call_id: runtime.toolCallId})
+          ],
+          researchTopic: topic
+        }
+      })
+    }
+  }, {
+    name: "read_previous_finding",
+    description: "Read the content of the previous research finding",
+    schema: z.object({
+      notesTopic: z.string().describe("name of the topic that is relevant"),
+      sameTopic: z.boolean().describe("Whether the current research topic is the same as an already previously made research topic")
+    })
+  }
+);
+
 const tavilyExtractTool = new TavilyExtract() as ClientTool;
 
-export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, tavilyExtractTool];
+interface SubAgentTask {
+  status: "running" | "completed" | "failed";
+  result?: string;
+  error?: string;
+  /** Whether subAgentNotifyMiddleware has already surfaced this task to the parent agent. */
+  delivered?: boolean;
+}
+
+// Module-scoped, in-memory only — tasks don't survive a process restart and
+// aren't part of graph state. Fine for a single script run; would need to move
+// into state (or a real Agent Protocol server) to survive across invocations.
+const subAgentTasks = new Map<string, SubAgentTask>();
+
+/**
+ * Pulls finished (completed/failed) tasks the parent agent hasn't seen yet,
+ * marking them delivered so they're only surfaced once. Used by
+ * subAgentNotifyMiddleware (agent.ts) to push results into the conversation
+ * without the model needing to remember to call check_subagent_status.
+ */
+export function drainFinishedSubAgentTasks(): { taskId: string; status: "completed" | "failed"; result?: string; error?: string }[] {
+  const finished: { taskId: string; status: "completed" | "failed"; result?: string; error?: string }[] = [];
+  for (const [taskId, task] of subAgentTasks) {
+    if (task.delivered || task.status === "running") continue;
+    task.delivered = true;
+    finished.push({
+      taskId,
+      status: task.status,
+      ...(task.result !== undefined && { result: task.result }),
+      ...(task.error !== undefined && { error: task.error }),
+    });
+  }
+  return finished;
+}
+
+/**
+ * Read-only check for tasks still running. Unlike drainFinishedSubAgentTasks,
+ * this never touches `delivered` — it's purely a peek, so checkUnfinishedSubAgents
+ * (agent.ts) can ask "is anything still outstanding?" without interfering with
+ * subAgentNotifyMiddleware's separate ownership of finished-task delivery.
+ */
+export function getRunningSubAgentTasks(): { taskId: string; status: "running" }[] {
+  const running: { taskId: string; status: "running" }[] = [];
+  for (const [taskId, task] of subAgentTasks) {
+    if (task.status === "running") {
+      running.push({ taskId, status: task.status });
+    }
+  }
+  return running;
+}
+
+const subAgentModel = new ChatOpenRouter({ model: MODELS.RESEARCH_AGENT, temperature: 0.2, maxTokens: 4096, maxRetries: 2 });
+
+const SUBAGENT_SYSTEM_PROMPT = "You are a focused research subagent. A parent research agent has given you one specific question or sub-task — investigate it thoroughly using web search, then return a concise, well-sourced write-up (what you found, why it matters, sources). Don't ask for clarification — do the best job you can with the instruction given. Your response is the only thing the parent agent sees, so make it self-contained.";
+
+const researchSubAgent = createAgent({
+  model: subAgentModel,
+  tools: [webSearchTool, tavilyExtractTool],
+  systemPrompt: SUBAGENT_SYSTEM_PROMPT,
+});
+
+const spawnSubAgent = tool(
+  async ({ instruction }) => {
+    const taskId = randomUUID();
+    subAgentTasks.set(taskId, { status: "running" });
+
+    researchSubAgent
+      .invoke(
+        { messages: [new HumanMessage(instruction)] },
+        { callbacks: [opikHandler], recursionLimit: 50 },
+      )
+      .then((result) => {
+        const messages = result.messages as BaseMessage[];
+        const last = messages[messages.length - 1];
+        const content = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
+        subAgentTasks.set(taskId, { status: "completed", result: content });
+      })
+      .catch((error) => {
+        subAgentTasks.set(taskId, { status: "failed", error: String(error) });
+      });
+
+    return `Spawned subagent. Task ID: ${taskId}. It runs in the background — keep working on other angles and check back with check_subagent_status when you're ready for the result, not immediately.`;
+  },
+  {
+    name: "spawn_subagent",
+    description: "Delegate a specific, self-contained research question to an isolated subagent that investigates it independently using web search, without adding its search noise to your own context. Runs in the background and returns a task ID immediately, not the result. Launch several in one turn (multiple tool calls) to investigate independent angles in parallel. Only the subagent's final write-up comes back to you, never its intermediate searches.",
+    schema: z.object({
+      instruction: z.string().describe("A specific, self-contained research question or task. The subagent sees only this instruction and nothing else about your conversation, so include everything it needs to know."),
+    }),
+  }
+);
+
+const checkSubAgentStatus = tool(
+  async ({ taskId }) => {
+    const task = subAgentTasks.get(taskId);
+    if (!task) return `No subagent task found for ID '${taskId}'.`;
+    if (task.status === "running") return `Task ${taskId} is still running.`;
+    if (task.status === "failed") return `Task ${taskId} failed: ${task.error}`;
+    return task.result;
+  },
+  {
+    name: "check_subagent_status",
+    description: "Check on a subagent task started with spawn_subagent. Returns its result once finished, its error if it failed, or confirmation it's still running.",
+    schema: z.object({
+      taskId: z.string().describe("The exact task ID returned by spawn_subagent. Pass it verbatim."),
+    }),
+  }
+);
+
+export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, tavilyExtractTool, skimPreviousFindings, readPreviousFinding, spawnSubAgent, checkSubAgentStatus];

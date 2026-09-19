@@ -1,7 +1,8 @@
 import { MODELS, opikHandler } from "../../models.js";
 import { ResearchAgentState } from "./state.js";
-import { researchTools } from "./tools.js";
+import { researchTools, drainFinishedSubAgentTasks, getRunningSubAgentTasks } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { HumanMessage } from "@langchain/core/messages";
 
 import {
     createAgent,
@@ -35,6 +36,56 @@ const researchModel = new ChatOpenRouter({
 })
 
 const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/research_agent/SYSTEM_PROMPT.md")
+
+
+const subAgentNotifyMiddleware = createMiddleware({
+  name: "subAgentNotifyMiddleware",
+  beforeModel: async () => {
+    const finished = drainFinishedSubAgentTasks();
+    if (finished.length === 0) return {};
+
+    const summary = finished
+      .map((t) =>
+        t.status === "completed"
+          ? `Subagent task ${t.taskId} finished:\n${t.result}`
+          : `Subagent task ${t.taskId} failed: ${t.error}`
+      )
+      .join("\n\n---\n\n");
+
+    return {
+      messages: [
+        new HumanMessage({
+          content: `[Background subagent update]\n\n${summary}`,
+          additional_kwargs: { lc_source: "subagent_notification" },
+        }),
+      ],
+    };
+  },
+});
+
+const checkUnfinishedSubAgents = createMiddleware({
+  name: "checkUnfinishedSubagentMiddleware",
+
+  afterAgent: {
+    canJumpTo: ["model"],
+    hook: async () => {
+      const running = getRunningSubAgentTasks();
+      if (running.length === 0) return undefined;
+
+      const taskList = running.map((t) => `- ${t.taskId}`).join("\n");
+
+      return {
+        messages: [
+          new HumanMessage({
+            content: `[Subagent check] You still have ${running.length} spawn_subagent task(s) running and unaccounted for:\n${taskList}\n\nDo not end your turn while these are outstanding. Keep working on something else, or call check_subagent_status on them, before finishing.`,
+            additional_kwargs: { lc_source: "subagent_notification" },
+          }),
+        ],
+        jumpTo: "model",
+      };
+    },
+  },
+})
 
 const compressGateMiddleware = createMiddleware({
   name: "compressGateMiddleware",
@@ -88,10 +139,12 @@ export const researchAgent = createAgent({
     model: researchModel,
     tools: researchTools,
     middleware: [
+        subAgentNotifyMiddleware,
         compressGateMiddleware,
         modelCallRetryMiddleware,
         searchRetryMiddleware,
-        toolErrorMiddleware({onError: onRetry})
+        toolErrorMiddleware({onError: onRetry}),
+        checkUnfinishedSubAgents
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: ResearchAgentState,
