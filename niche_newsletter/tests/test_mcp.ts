@@ -26,7 +26,10 @@ async function getBufferTools(): Promise<DynamicStructuredTool[]> {
 
     try {
         const tools = await client.getTools();
-        console.log(tools.map(tool => tool.name))
+        for (const tool of tools) {
+            if (tool.name === "create_post") console.log(tool)
+        }
+        // console.log(tools.map(tool => tool.name))
         // return tools.filter(tool => KEEP_BUFFER_TOOLS.has(tool.name));
         return [];
     } catch (error) {
@@ -98,4 +101,4 @@ async function getApifyTools(): Promise<DynamicStructuredTool[]> {
     }
 };
 
-console.log(await getApifyTools());
+console.log(await getBufferTools());

@@ -20,6 +20,7 @@ import { ToolMessage } from "@langchain/core/messages";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
+import { checkpointer } from "../checkpointer.js";
 
 dotenv.config();
 
@@ -73,6 +74,32 @@ const bufferUserPiiGuard = createMiddleware({
   },
 });
 
+// Gates every create_post call on manager approval — the graph pauses here (via
+// runtime.interrupt) until the distribution manager resumes it with a review decision.
+// Structural on purpose: the model can't accidentally publish/schedule without review,
+// since it's not the model's call whether to ask for one.
+const reviewGateMiddleware = createMiddleware({
+  name: "reviewGateMiddleware",
+
+  wrapToolCall: async (request, handler) => {
+    if (request.toolCall.name !== "create_post") return handler(request);
+
+    const decision = request.runtime.interrupt!({
+      type: "sm_post_review",
+      args: request.toolCall.args,
+    }) as { approved: boolean; feedback?: string };
+
+    if (!decision.approved) {
+      return new ToolMessage({
+        content: `Post not approved by manager review${decision.feedback ? `: ${decision.feedback}` : "."}`,
+        tool_call_id: request.toolCall.id ?? "",
+      });
+    }
+
+    return handler(request);
+  },
+});
+
 export const SMAgent = createAgent({
     model: SMModel,
     tools: SMTools,
@@ -80,8 +107,10 @@ export const SMAgent = createAgent({
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
         bufferUserPiiGuard,
+        reviewGateMiddleware,
         // toolsConfig
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: SMAgentState,
+    checkpointer: checkpointer
 });

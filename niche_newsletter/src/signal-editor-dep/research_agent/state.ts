@@ -6,7 +6,6 @@ import { registry } from "@langchain/langgraph/zod";
 export const ResearchAgentState = z.object({
   // MessagesZodMeta's optional fields aren't typed for exactOptionalPropertyTypes; cast is a library-typing gap, not a logic issue
   messages: z.array(z.custom<BaseMessage>()).default([]).register(registry, MessagesZodMeta as Parameters<typeof registry.add>[1]),
-  results: z.array(z.string()).default([]),
   researchTopic: z.string(),
 
   iterationCount: z.number().default(0), // total model-call iterations this run

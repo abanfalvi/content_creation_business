@@ -13,31 +13,6 @@ export const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 export const NOTION_REDIRECT_URL = "http://localhost:8787/oauth/callback";
 export const NOTION_TOKEN_STORE_PATH = "src/shared/.auth/notion_oauth.json";
 
-const KEEP_NOTION_TOOLS = new Set([
-    "notion-search",
-    "notion-fetch",
-    "notion-create-pages",
-    "notion-update-page",
-    "notion-move-pages",
-    "notion-duplicate-page",
-    "notion-list-private-pages",
-    "notion-list-recent-pages",
-    "notion-list-favorite-pages",
-    "notion-create-database",
-    "notion-update-data-source",
-    "notion-create-view",
-    "notion-update-view",
-    "notion-create-attachment",
-    "notion-create-file-upload",
-    "notion-download-attachment",
-    "notion-create-folder",
-    "notion-update-folder",
-    "notion-search-skills",
-    "notion-convert-page-to-skill",
-    "notion-get-users",
-    "notion-get-async-task",
-]);
-
 // Notion's hosted remote MCP server is confirmed OAuth-only — a static bearer token gets
 // a 403 ("Endpoint unavailable"). FileBackedOAuthProvider (shared) implements the MCP
 // SDK's OAuthClientProvider against a small local JSON file, so the interactive
@@ -51,7 +26,7 @@ const KEEP_NOTION_TOOLS = new Set([
 // without Notion tools instead of failing agent startup entirely. If Notion tools turn
 // out to be load-bearing for a given agent's job rather than optional, that agent should
 // treat an empty result as fatal itself rather than this loader throwing.
-export async function getNotionMCP(): Promise<DynamicStructuredTool[]> {
+export async function getNotionMCP(toolList: Set<string>): Promise<DynamicStructuredTool[]> {
     const authProvider = new FileBackedOAuthProvider("notion", NOTION_REDIRECT_URL, NOTION_TOKEN_STORE_PATH, NOTION_MCP_APP_NAME);
 
     const savedTokens = await authProvider.tokens();
@@ -74,7 +49,7 @@ export async function getNotionMCP(): Promise<DynamicStructuredTool[]> {
     try {
         const tools = await client.getTools();
 
-        return tools.filter(tool => KEEP_NOTION_TOOLS.has(tool.name));
+        return tools.filter(tool => toolList.has(tool.name));
     } catch (error) {
         console.error("Failed to load Notion MCP tools:", error);
         return [];

@@ -8,6 +8,19 @@ import { getNotionMCP } from "../../shared/notion_mcp.js";
 // get their followers who are engaging with their contents (check comments) -> load them to Notion
 // manager checks the list of possible leads -> if approved, agent sends a DM
 
+const KEEP_NOTION_TOOLS = new Set([
+    "notion-search",
+    "notion-fetch",
+    "notion-create-pages",
+    "notion-update-page",
+    "notion-move-pages",
+    "notion-duplicate-page",
+    "notion-create-database",
+    "notion-update-data-source",
+    "notion-create-view",
+    "notion-update-view",
+]);
+
 // One versatile actor covers all three cases below — which content it returns is
 // picked with `resultsType` ("details" | "posts" | "comments"), not by actor choice.
 const INSTAGRAM_ACTOR = "apify/instagram-scraper";
@@ -198,5 +211,5 @@ const getPostComments = tool(
 );
 
 // const apifyTools = await getApifyTools();
-const notionTools = await getNotionMCP();
+const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
 export const outreachTools = [scrapePopularPagePosts, getPostComments, ...notionTools];

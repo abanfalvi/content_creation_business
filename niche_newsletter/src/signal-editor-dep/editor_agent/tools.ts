@@ -16,8 +16,70 @@ import { Dropbox, DropboxResponseError } from 'dropbox';
 import { EditorAgentState } from "./state.js";
 import { MODELS } from "../../models.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
-import { getBeehiivMCP } from "./mcp.js"
+import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js"
 import { getNotionMCP } from "../../shared/notion_mcp.js";
+
+const KEEP_BEEHIIV_TOOLS = new Set([
+    "edit_post",
+    "edit_post_content",
+    "edit_post_template",
+    "edit_post_template_content",
+    "get_post",
+    "get_post_content",
+    "get_post_footer",
+    "get_post_template_content",
+    "learn_post_authoring",
+    "learn_post_metadata",
+    "list_post_templates",
+    "list_posts",
+    "save_post",
+    "save_post_footer",
+    "save_post_template",
+    "save_post_template_theme",
+    "save_post_theme",
+    "duplicate_post",
+    "duplicate_post_template",
+    "save_split_test",
+    // Visuals/assets
+    // "generate_image",
+    "get_asset",
+    // "get_image_generation_status",
+    "list_assets",
+    "save_file",
+    "save_image",
+    "update_asset",
+    // Metadata
+    "list_content_tags",
+    "save_content_tag",
+    // Self-service API discovery
+    "read_documentation",
+    "search_documentation",
+])
+
+const KEEP_NOTION_TOOLS = new Set([
+    "notion-search",
+    "notion-fetch",
+    "notion-create-pages",
+    "notion-update-page",
+    "notion-move-pages",
+    "notion-duplicate-page",
+    "notion-list-private-pages",
+    "notion-list-recent-pages",
+    "notion-list-favorite-pages",
+    "notion-create-database",
+    "notion-update-data-source",
+    "notion-create-view",
+    "notion-update-view",
+    "notion-create-attachment",
+    "notion-create-file-upload",
+    "notion-download-attachment",
+    "notion-create-folder",
+    "notion-update-folder",
+    "notion-search-skills",
+    "notion-convert-page-to-skill",
+    "notion-get-users",
+    "notion-get-async-task",
+]);
 
 // TS 7's nodenext resolution can't fully model this package's shape (conditional `exports`
 // map + a `.d.ts` with no `"type"` field to disambiguate CJS/ESM) and falls back to an
@@ -224,7 +286,7 @@ const generateImages = tool(
     }
 );
 
-const notionTools = await getNotionMCP();
-const beehiivTools = await getBeehiivMCP();
+const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
+const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
 export const editorTools = [getResearchFindings, generateImages, createChart, ...notionTools, ...beehiivTools];
