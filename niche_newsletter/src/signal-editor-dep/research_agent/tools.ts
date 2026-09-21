@@ -265,8 +265,9 @@ const readPreviousFinding = tool(
   async ({notesTopic, sameTopic}, runtime: ToolRuntime) => {
     const topic = notesTopic.toLowerCase().replace(" ", "_")
     const fullPath = join("src/signal-editor-dep/research_agent/scratch_pad", `${topic}_notes.md`);
+    let content: string;
     try {
-        var content = await readOrInitFile(fullPath);
+        content = await readOrInitFile(fullPath);
       } catch {
         return "File not found, please use the topic names returned in the skimPreviousFindings tool"
       }

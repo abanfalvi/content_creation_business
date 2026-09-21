@@ -12,6 +12,12 @@ import { glob } from "glob";
 import { basename, join } from "path";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../shared/file_utils.js";
 import { getBeehiivMCP } from "../shared/beehiiv_mcp.js";
+import { DigProdCreationAgent } from "../curriculum-dep/dig_prod_creator_agent/agent.js";
+
+function lastMessageContent(result: { messages: { content: unknown }[] }): string {
+    const last = result.messages.at(-1);
+    return typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
+}
 
 const searchClient = new Parallel({ apiKey: process.env.PARALLEL_SEARCH_API_KEY });
 
@@ -24,7 +30,18 @@ const KEEP_BEEHIIV_TOOLS = new Set([
     "get_website_analytics",
     "get_website_analytics_breakdown",
     "get_website_analytics_conditions_schema",
+
+    "get_referral_program",
+    "list_recommendations",
 ])
+
+const handoffContract = z.object({
+    task_id: z.string().describe("Unique id for this assignment"),
+    objectives: z.array(z.string()).describe("What this call should accomplish"),
+    constraints: z.array(z.string()).describe("What narrows the work — angle, source doc, what to leave out"),
+    deliverables: z.array(z.string()).describe("What you expect back"),
+});
+type HandoffContract = z.infer<typeof handoffContract>;
 
 const callEditorManager = tool(
     async ({instruction, researchTopic, step}, runtime: ToolRuntime<AgentStateType>) => {
@@ -64,6 +81,53 @@ const callDistributionManager = tool(
         })
     }
 );
+
+const calDigProdCreationAgent = tool(
+    async ({instruction, doc_content_strategy_name},  runtime: ToolRuntime<AgentStateType>) => {
+        const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
+        const threadId = `${currentThreadId}:dig_prod_creation_agent`
+        const fullPath = `content_strategy/${doc_content_strategy_name.toLocaleLowerCase().replace(" ", "_")}.md`
+        const result = await DigProdCreationAgent.invoke(
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})], doc_content_path: fullPath},
+            { configurable: { thread_id: threadId } }
+        )
+        return new Command({
+            update: {
+                messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
+                sandboxId: result.sandboxId,
+            }
+        })
+    }, {
+        name: "call_dig_prod_creation_agent",
+        description: "Call this agent when you want to create digital products",
+        schema: z.object({
+            doc_content_strategy_name: z.string().describe("filename of the document containing what the created document should be about"),
+            instruction: handoffContract
+        })
+    }
+);
+
+const sendAnswerToDigProdCreationAgent = tool(
+    async (reviewDecision: { approved: boolean; feedback?: string }, runtime: ToolRuntime<AgentStateType>) => {
+        const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
+        const threadId = `${managerThreadId ?? "unknown"}:dig_prod_creation_agent`;
+
+        const result = await DigProdCreationAgent.invoke(
+            new Command({ resume: reviewDecision }),
+            { configurable: { thread_id: threadId } }
+        );
+
+        return result.messages.at(-1)?.content;
+    }, {
+        name: "send_review_answer_to_dig_prod_creation_agent",
+        description: "Resume the digital product agent's paused document (paused when it tried to call create_document, for you to review the pending code/args) with your review decision. Approving lets it actually render and host the document as-is; rejecting sends it back with concrete feedback to revise before trying again.",
+        schema: z.object({
+            approved: z.boolean().describe("Whether to approve the pending document for rendering/hosting as-is"),
+            feedback: z.string().optional().describe("Required when approved is false — concrete, specific feedback for the digital product agent to revise the document"),
+        }),
+    }
+);
+
 
 const CONTENT_STRATEGY_DIR = "content_strategy/";
 
@@ -233,6 +297,8 @@ const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 export const orchestratorTools = [
     callEditorManager,
     callDistributionManager,
+    calDigProdCreationAgent,
+    sendAnswerToDigProdCreationAgent,
     webSearch,
     extractWebContent,
     listContentStrategyThemes,

@@ -43,6 +43,8 @@ src/distribution-dep/sm_agent/.auth
 src/shared/.auth
 src/distribution-dep/.checkpoints
 src/orchestrator/.checkpoints
+src/curriculum-dep/.checkpoints
 .beehiiv-*
+pdf_playground/output/
 
 .kilo/

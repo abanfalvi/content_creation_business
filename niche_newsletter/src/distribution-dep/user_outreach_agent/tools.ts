@@ -8,6 +8,8 @@ import { getNotionMCP } from "../../shared/notion_mcp.js";
 // get their followers who are engaging with their contents (check comments) -> load them to Notion
 // manager checks the list of possible leads -> if approved, agent sends a DM
 
+type MediaInsightMetric = [];
+
 const KEEP_NOTION_TOOLS = new Set([
     "notion-search",
     "notion-fetch",
@@ -46,6 +48,20 @@ function toPostUrl(idOrUrl: string): string {
         : `https://www.instagram.com/p/${idOrUrl}/`;
 }
 
+function getMetaCredentials(): { token: string; userId: string } | null {
+    const token = process.env.INSTAGRAM_ACCESS_TOKEN;
+    const userId = process.env.INSTAGRAM_USER_ID;
+    if (!token || !userId) {
+        console.warn("INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_USER_ID is not set");
+        return null;
+    }
+    return { token, userId };
+}
+
+// Meta's Instagram API with Instagram Login (no linked Facebook Page required) —
+// https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api
+const INSTAGRAM_GRAPH_API = "https://graph.instagram.com/v26.0";
+
 interface InstagramProfileDetails {
     username: string;
     followersCount?: number;
@@ -69,6 +85,33 @@ interface InstagramComment {
     text?: string;
     timestamp?: string;
     [key: string]: unknown;
+}
+
+interface InstagramParticipant {
+    id: string;
+    username?: string;
+}
+
+interface InstagramConversation {
+    id: string;
+    updated_time: string;
+    participants?: { data?: InstagramParticipant[] };
+}
+
+interface InstagramConversationsResponse {
+    data: InstagramConversation[];
+}
+
+interface InstagramMessage {
+    id: string;
+    created_time: string;
+    from?: InstagramParticipant;
+    message?: string;
+}
+
+interface InstagramConversationDetail {
+    id: string;
+    messages?: { data: InstagramMessage[] };
 }
 
 const scrapePopularPagePosts = tool(
@@ -210,6 +253,133 @@ const getPostComments = tool(
     }
 );
 
+// Reading/replying only — Instagram's Messaging API only allows a business account to
+// message a user who has messaged it first (within its standard messaging window), so
+// there's deliberately no "cold DM a scraped lead" tool here. That's a Meta platform
+// policy limit, not a missing feature: it can't be worked around by calling a different
+// endpoint. Once a lead has actually messaged the account (e.g. after seeing a comment
+// reply or a story mention), these tools can be used to read and reply to that thread.
+
+const listInstagramConversations = tool(
+    async ({ limit = 20 }) => {
+        const creds = getMetaCredentials();
+        if (!creds) {
+            return "INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_USER_ID are not set — cannot read Instagram DMs.";
+        }
+
+        const url = new URL(`${INSTAGRAM_GRAPH_API}/${creds.userId}/conversations`);
+        url.searchParams.set("platform", "instagram");
+        url.searchParams.set("fields", "participants,updated_time");
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("access_token", creds.token);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            const body = await response.text();
+            return `Failed to list Instagram conversations (${response.status}): ${body}`;
+        }
+
+        const data = await response.json() as InstagramConversationsResponse;
+        const results = data.data.map((conversation) => {
+            const other = conversation.participants?.data?.find((p) => p.id !== creds.userId);
+            return {
+                conversationId: conversation.id,
+                participantId: other?.id,
+                participantUsername: other?.username,
+                updatedTime: conversation.updated_time,
+            };
+        });
+        return JSON.stringify(results);
+    }, {
+        name: "list_instagram_conversations",
+        description: "List this account's Instagram DM conversations, most recently updated first. Returns each conversation's id and the other participant's id/username. Pass conversationId to get_instagram_conversation_messages to read the thread, or participantId to send_instagram_reply.",
+        schema: z.object({
+            limit: z.number().int().positive().max(50).optional().default(20)
+                .describe("Max conversations to return (default 20, max 50)"),
+        }),
+    }
+);
+
+const getInstagramConversationMessages = tool(
+    async ({ conversationId, limit = 20 }) => {
+        const creds = getMetaCredentials();
+        if (!creds) {
+            return "INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_USER_ID are not set — cannot read Instagram DMs.";
+        }
+
+        const url = new URL(`${INSTAGRAM_GRAPH_API}/${conversationId}`);
+        url.searchParams.set("fields", `messages.limit(${limit}){id,created_time,from,message}`);
+        url.searchParams.set("access_token", creds.token);
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            const body = await response.text();
+            return `Failed to fetch Instagram conversation messages (${response.status}): ${body}`;
+        }
+
+        const data = await response.json() as InstagramConversationDetail;
+        const messages = (data.messages?.data ?? []).map((msg) => ({
+            id: msg.id,
+            fromId: msg.from?.id,
+            fromUsername: msg.from?.username,
+            fromSelf: msg.from?.id === creds.userId,
+            text: msg.message,
+            createdTime: msg.created_time,
+        }));
+        return JSON.stringify(messages);
+    }, {
+        name: "get_instagram_conversation_messages",
+        description: "Read the message history of one Instagram DM conversation (id from list_instagram_conversations). Each message reports who sent it, whether it was this account (fromSelf), its text, and when — most recent first.",
+        schema: z.object({
+            conversationId: z.string().describe("Conversation id, as returned by list_instagram_conversations"),
+            limit: z.number().int().positive().max(100).optional().default(20)
+                .describe("Max messages to return (default 20, max 100)"),
+        }),
+    }
+);
+
+const sendInstagramReply = tool(
+    async ({ recipientId, text }) => {
+        const creds = getMetaCredentials();
+        if (!creds) {
+            return "INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_USER_ID are not set — cannot send Instagram DMs.";
+        }
+
+        const url = new URL(`${INSTAGRAM_GRAPH_API}/${creds.userId}/messages`);
+        url.searchParams.set("access_token", creds.token);
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                recipient: { id: recipientId },
+                message: { text },
+            }),
+        });
+        if (!response.ok) {
+            const body = await response.text();
+            return `Failed to send Instagram reply (${response.status}): ${body}`;
+        }
+
+        const data = await response.json() as { message_id?: string };
+        return `Reply sent to ${recipientId} (message id ${data.message_id ?? "unknown"}).`;
+    }, {
+        name: "send_instagram_reply",
+        description: "Send a text DM reply to a specific Instagram user (recipientId = participantId/fromId from the conversation tools). Only works within an existing conversation — Instagram does not allow messaging someone who hasn't messaged this account first, so this can't be used to cold-contact a new lead.",
+        schema: z.object({
+            recipientId: z.string().describe("Recipient's Instagram-scoped user id, from list_instagram_conversations or get_instagram_conversation_messages"),
+            text: z.string().min(1).describe("Message text to send"),
+        }),
+    }
+);
+
 // const apifyTools = await getApifyTools();
 const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
-export const outreachTools = [scrapePopularPagePosts, getPostComments, ...notionTools];
+export const outreachTools = [
+    scrapePopularPagePosts,
+    getPostComments,
+    listInstagramConversations,
+    getInstagramConversationMessages,
+    sendInstagramReply,
+    ...notionTools,
+];

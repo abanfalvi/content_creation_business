@@ -25,6 +25,15 @@ const KEEP_BEEHIIV_TOOLS = new Set([
     "get_post_content",
     "get_post_footer",
     "list_posts",
+    // Referral program management — creating/editing milestones, rewards, and program
+    // settings. Reading how the program is performing is the orchestrator's job, not
+    // this agent's; it only needs get_referral_program as a prerequisite read before
+    // save_referral_program/save_referral_milestone (both require current settings).
+    "get_referral_program",
+    "list_referral_rewards",
+    "save_referral_reward",
+    "save_referral_milestone",
+    "save_referral_program",
 ])
 
 function lastMessageContent(result: { messages: { content: unknown }[] }): string {

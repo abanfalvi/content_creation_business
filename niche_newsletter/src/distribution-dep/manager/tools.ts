@@ -7,7 +7,6 @@ import { type AgentStateType, smPostRubric } from "./state.js";
 import type { SMPostRubricType } from "./state.js";
 import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { SMAgent } from "../sm_agent/agent.js";
-import { OutreachAgent } from "../user_outreach_agent/agent.js";
 
 const KEEP_NOTION_TOOLS = new Set([
     "notion-search",
@@ -144,16 +143,4 @@ const callSMAgent = tool(
     }
 );
 
-const callUserOutreachAgent = tool(
-    async (instruction: handoffContract) => {
-        const result = await OutreachAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})]})
-        return result.messages.at(-1)?.content
-    }, {
-        name: "call_user_outreach_agent",
-        description: "Call this agent to find potential leads for the newsletter",
-    }
-);
-
-const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
-
-export const managerTools = [reviewSocialPost, sendReviewAnswerToSMAgent, callSMAgent, callUserOutreachAgent, ...notionTools];
+export const managerTools = [reviewSocialPost, sendReviewAnswerToSMAgent, callSMAgent];

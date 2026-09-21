@@ -5,7 +5,7 @@ import { FileBackedOAuthProvider } from "../../shared/mcp_oauth_provider.js";
 
 dotenv.config();
 
-export const SM_AGENT_APP_NAME = "niche-newsletter-sm-agent";
+export const SM_AGENT_APP_NAME = "niche-newsletter-sm-agent (canva)";
 
 const KEEP_BUFFER_TOOLS = new Set([
     'get_account',
