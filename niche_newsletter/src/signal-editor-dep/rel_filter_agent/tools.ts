@@ -9,6 +9,7 @@ import { RelFilterAgentState } from "./state.js";
 import { tavily } from "@tavily/core";
 import { researchAgent } from "../research_agent/agent.js"
 import { applyFindAndReplace } from "../../shared/file_utils.js";
+import { dataPaths } from "../../shared/paths.js";
 
 const yamlString = z.string().refine((val) => {
     try {
@@ -22,7 +23,7 @@ const yamlString = z.string().refine((val) => {
 const readResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const researchTopic = runtime.state.researchTopic
-        const filePath = join("src/signal-editor-dep/research_agent/scratch_pad/", `${researchTopic}_notes.md`)
+        const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`)
         const findings = await readFile(filePath, "utf-8")
         return findings;
     }, {
@@ -33,7 +34,7 @@ const readResearchFindings = tool(
 const editResearchFindings = tool(
     async ({to_replace, replace_with}, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const researchTopic = runtime.state.researchTopic
-        const filePath = join("src/signal-editor-dep/research_agent/scratch_pad/", `${researchTopic}_notes.md`)
+        const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`)
 
         try {
             const outcome = await applyFindAndReplace(filePath, to_replace, replace_with);
@@ -60,7 +61,7 @@ const editResearchFindings = tool(
 const addSummaries = tool(
     async ({summary}, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const researchTopic = runtime.state.researchTopic
-        const filePath = join("src/signal-editor-dep/research_agent/scratch_pad/", `${researchTopic}_notes.md`)
+        const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`)
         const findings = await readFile(filePath, "utf-8")
         await writeFile(filePath, summary + findings)
 

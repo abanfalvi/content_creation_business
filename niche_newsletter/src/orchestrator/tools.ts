@@ -12,7 +12,7 @@ import { glob } from "glob";
 import { basename, join } from "path";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../shared/file_utils.js";
 import { getBeehiivMCP } from "../shared/beehiiv_mcp.js";
-import { DigProdCreationAgent } from "../curriculum-dep/dig_prod_creator_agent/agent.js";
+import { dataPaths } from "../shared/paths.js";
 
 function lastMessageContent(result: { messages: { content: unknown }[] }): string {
     const last = result.messages.at(-1);
@@ -84,9 +84,10 @@ const callDistributionManager = tool(
 
 const calDigProdCreationAgent = tool(
     async ({instruction, doc_content_strategy_name},  runtime: ToolRuntime<AgentStateType>) => {
+        const { DigProdCreationAgent } = await import("../curriculum-dep/dig_prod_creator_agent/agent.js");
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:dig_prod_creation_agent`
-        const fullPath = `content_strategy/${doc_content_strategy_name.toLocaleLowerCase().replace(" ", "_")}.md`
+        const fullPath = join(dataPaths.contentStrategy(), `${doc_content_strategy_name.toLocaleLowerCase().replace(" ", "_")}.md`)
         const result = await DigProdCreationAgent.invoke(
             {messages: [new HumanMessage({content: JSON.stringify(instruction)})], doc_content_path: fullPath},
             { configurable: { thread_id: threadId } }
@@ -109,6 +110,7 @@ const calDigProdCreationAgent = tool(
 
 const sendAnswerToDigProdCreationAgent = tool(
     async (reviewDecision: { approved: boolean; feedback?: string }, runtime: ToolRuntime<AgentStateType>) => {
+        const { DigProdCreationAgent } = await import("../curriculum-dep/dig_prod_creator_agent/agent.js");
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${managerThreadId ?? "unknown"}:dig_prod_creation_agent`;
 
@@ -129,18 +131,17 @@ const sendAnswerToDigProdCreationAgent = tool(
 );
 
 
-const CONTENT_STRATEGY_DIR = "content_strategy/";
 
 const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
 
 const listContentStrategyThemes = tool(
     async () => {
-        const files = await glob("*.md", { cwd: CONTENT_STRATEGY_DIR });
+        const files = await glob("*.md", { cwd: dataPaths.contentStrategy() });
         if (files.length === 0) return "No content strategy themes exist yet.";
 
         return Promise.all(files.map(async (file) => {
             const theme = basename(file, ".md");
-            const content = await readOrInitFile(join(CONTENT_STRATEGY_DIR, file));
+            const content = await readOrInitFile(join(dataPaths.contentStrategy(), file));
             const preview = content.split("\n").find(line => line.trim().length > 0)?.trim() ?? "";
             return { theme, preview };
         }));
@@ -152,7 +153,7 @@ const listContentStrategyThemes = tool(
 
 const readContentStrategy = tool(
     async ({ theme }) => {
-        const path = join(CONTENT_STRATEGY_DIR, `${slugifyTheme(theme)}.md`);
+        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
         return await readOrInitFile(path);
     }, {
         name: "read_content_strategy",
@@ -165,7 +166,7 @@ const readContentStrategy = tool(
 
 const editContentStrategy = tool(
     async ({ theme, to_replace, replace_with }) => {
-        const path = join(CONTENT_STRATEGY_DIR, `${slugifyTheme(theme)}.md`);
+        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
         const outcome = await applyFindAndReplace(path, to_replace, replace_with);
 
         if (outcome.status === "not_found") {
@@ -188,7 +189,7 @@ const editContentStrategy = tool(
 
 const addToContentStrategy = tool(
     async ({ theme, content }) => {
-        const path = join(CONTENT_STRATEGY_DIR, `${slugifyTheme(theme)}.md`);
+        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
         await appendFileEnsuringDir(path, content);
         return `Added to the "${theme}" strategy doc.`;
     }, {
@@ -206,14 +207,14 @@ const SEARCH_MAX_MATCHES = 20;
 
 const searchContentStrategy = tool(
     async ({ query }) => {
-        const files = await glob("*.md", { cwd: CONTENT_STRATEGY_DIR });
+        const files = await glob("*.md", { cwd: dataPaths.contentStrategy() });
         const needle = query.toLowerCase();
         const matches: { theme: string; line: number; snippet: string }[] = [];
 
         for (const file of files) {
             if (matches.length >= SEARCH_MAX_MATCHES) break;
             const theme = basename(file, ".md");
-            const content = await readOrInitFile(join(CONTENT_STRATEGY_DIR, file));
+            const content = await readOrInitFile(join(dataPaths.contentStrategy(), file));
             const lines = content.split("\n");
 
             for (let i = 0; i < lines.length; i++) {

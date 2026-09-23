@@ -5,10 +5,6 @@ import { Command } from "@langchain/langgraph";
 import { type AgentStateType, newsletterRubric } from "./state.js";
 import type { NewsletterRubricType } from "./state.js";
 import { getNotionMCP } from "../../shared/notion_mcp.js";
-import { editorAgent } from "../editor_agent/agent.js";
-import { relFilterAgent } from "../rel_filter_agent/agent.js";
-import { researchAgent } from "../research_agent/agent.js";
-import { userCaseWriterAgent } from "../use_case_writer_agent/agent.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js";
 
 type handoffContract = {
@@ -43,6 +39,7 @@ function lastMessageContent(result: { messages: { content: unknown }[] }): strin
 
 const callEditorAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const { editorAgent } = await import("../editor_agent/agent.js");
         const topic = runtime.state.researchTopic
         const result = await editorAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
         return result.messages.at(-1)?.content
@@ -54,6 +51,7 @@ const callEditorAgent = tool(
 
 const callRelevanceFilterAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const { relFilterAgent } = await import("../rel_filter_agent/agent.js");
         const topic = runtime.state.researchTopic
         const result = await relFilterAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
@@ -71,6 +69,7 @@ const callRelevanceFilterAgent = tool(
 
 const callResearchAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const { researchAgent } = await import("../research_agent/agent.js");
         const topic = runtime.state.researchTopic
         const result = await researchAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
@@ -88,6 +87,7 @@ const callResearchAgent = tool(
 
 const callUseCaseWriterAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const { userCaseWriterAgent } = await import("../use_case_writer_agent/agent.js");
         const topic = runtime.state.researchTopic
         const result = await userCaseWriterAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content

@@ -6,7 +6,6 @@ import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { type AgentStateType, smPostRubric } from "./state.js";
 import type { SMPostRubricType } from "./state.js";
 import { getNotionMCP } from "../../shared/notion_mcp.js";
-import { SMAgent } from "../sm_agent/agent.js";
 
 const KEEP_NOTION_TOOLS = new Set([
     "notion-search",
@@ -75,13 +74,14 @@ const reviewSocialPost = tool(
         return `Needs revision! Turn this into a concrete instruction for send_review_answer_to_sm_agent's feedback (approved: false), don't just resend the topic:\n${rubric.formatCorrectEvidence}`;
     }, {
         name: "review_social_post",
-        description: "Score the pending social post (from the interrupt payload call_social_media_agent returned) against the quality rubric — whether it stays consistent with the 'Actualizate IA' template, with your evidence either way. Call this before send_review_answer_to_sm_agent so your approval/rejection is backed by an actual judgment, not a rubber stamp.",
+        description: "Score the pending social post (from the interrupt payload call_social_media_agent returned) against the quality rubric — whether it stays consistent with the 'The AI Skill Brief' template, with your evidence either way. Call this before send_review_answer_to_sm_agent so your approval/rejection is backed by an actual judgment, not a rubber stamp.",
         schema: smPostRubric,
     }
 );
 
 const sendReviewAnswerToSMAgent = tool(
     async (reviewDecision: { approved: boolean; feedback?: string }, runtime: ToolRuntime<AgentStateType>) => {
+        const { SMAgent } = await import("../sm_agent/agent.js");
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${managerThreadId ?? "unknown"}:sm_agent`;
 
@@ -116,6 +116,7 @@ const sendReviewAnswerToSMAgent = tool(
 
 const callSMAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const { SMAgent } = await import("../sm_agent/agent.js");
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${managerThreadId ?? "unknown"}:sm_agent`;
         const result = await SMAgent.invoke(

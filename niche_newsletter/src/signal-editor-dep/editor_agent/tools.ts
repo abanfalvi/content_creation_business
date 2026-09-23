@@ -18,6 +18,7 @@ import { MODELS } from "../../models.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js"
 import { getNotionMCP } from "../../shared/notion_mcp.js";
+import { dataPaths } from "../../shared/paths.js";
 
 const KEEP_BEEHIIV_TOOLS = new Set([
     "edit_post",
@@ -97,8 +98,6 @@ interface QuickChartInstance {
 }
 const QuickChart = QuickChartModule.default as unknown as new () => QuickChartInstance;
 
-const SCRATCH_PAD_DIR = "src/signal-editor-dep/use_case_writer_agent/scratch_pad/";
-const RESEARCH_SCRATCH_PAD_DIR = "src/signal-editor-dep/research_agent/scratch_pad/";
 
 // Chart.js's real config space is huge and chart-type-specific (radar uses `scales.r`,
 // doughnut uses `cutout`, etc.) — modeling all of it in zod isn't practical, and quickchart-js
@@ -165,8 +164,8 @@ const createChart = tool(
 const getResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof EditorAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const researchFilePath = join(RESEARCH_SCRATCH_PAD_DIR, `${researchTopic}_notes.md`);
-        const useCaseFilePath = join(SCRATCH_PAD_DIR, `${researchTopic}_use_cases.md`);
+        const researchFilePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`);
+        const useCaseFilePath = join(dataPaths.useCaseScratchPad(), `${researchTopic}_use_cases.md`);
         const researchContent = await readOrInitFile(researchFilePath);
         const useCaseContent = await readOrInitFile(useCaseFilePath);
         const combined = `Research findings: ${researchContent}\n\n Use case description (if provided): ${useCaseContent}`

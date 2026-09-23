@@ -6,6 +6,7 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { FileBackedOAuthProvider } from "./mcp_oauth_provider.js";
+import { guardWriteTools, BEEHIIV_WRITE_TOOLS } from "./eval_guard.js";
 
 export const BEEHIIV_MCP_APP_NAME = "niche-newsletter";
 
@@ -16,6 +17,8 @@ export const BEEHIIV_MCP_URL = "https://mcp.beehiiv.com/mcp";
 // listener free to bind without colliding with the other.
 export const BEEHIIV_REDIRECT_URL = "http://localhost:8788/oauth/callback";
 export const BEEHIIV_TOKEN_STORE_PATH = "src/shared/.auth/beehiiv_oauth.json";
+
+let beehiivToolsPromise: Promise<DynamicStructuredTool[]> | null = null;
 
 // beehiiv's hosted remote MCP server is confirmed OAuth-only — a static bearer token
 // gets an unauthorized error even with a valid beehiiv API key. FileBackedOAuthProvider
@@ -30,31 +33,27 @@ export const BEEHIIV_TOKEN_STORE_PATH = "src/shared/.auth/beehiiv_oauth.json";
 // token, an unreachable server, or an auth failure degrades the calling agent to running
 // without beehiiv tools instead of failing agent startup entirely.
 export async function getBeehiivMCP(toolList: Set<string>): Promise<DynamicStructuredTool[]> {
-    const authProvider = new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH, BEEHIIV_MCP_APP_NAME);
-
-    const savedTokens = await authProvider.tokens();
-    if (!savedTokens) {
-        console.warn(
-            "No saved beehiiv OAuth tokens found — skipping beehiiv MCP tools. Run the one-time setup once: " +
-            "npx tsx src/shared/setups/beehiiv_oauth_setup.ts"
-        );
-        return [];
+    if (beehiivToolsPromise === null) {
+        beehiivToolsPromise = (async () => {
+            const authProvider = new FileBackedOAuthProvider("beehiiv", BEEHIIV_REDIRECT_URL, BEEHIIV_TOKEN_STORE_PATH, BEEHIIV_MCP_APP_NAME);
+            const savedTokens = await authProvider.tokens();
+            if (!savedTokens) {
+                console.warn("No saved beehiiv OAuth tokens found — skipping beehiiv MCP tools. Run the one-time setup once: npx tsx src/shared/setups/beehiiv_oauth_setup.ts");
+                return [];
+            }
+            const client = new MultiServerMCPClient({
+                beehiiv: { transport: "http", url: BEEHIIV_MCP_URL, authProvider },
+            });
+            try {
+                return await client.getTools();
+            } catch (error) {
+                console.error("Failed to load beehiiv MCP tools:", error);
+                beehiivToolsPromise = null;
+                return [];
+            }
+        })();
     }
 
-    const client = new MultiServerMCPClient({
-        beehiiv: {
-            transport: "http",
-            url: BEEHIIV_MCP_URL,
-            authProvider,
-        },
-    });
-
-    try {
-        const tools = await client.getTools();
-
-        return tools.filter(tool => toolList.has(tool.name));
-    } catch (error) {
-        console.error("Failed to load beehiiv MCP tools:", error);
-        return [];
-    }
+    const tools = await beehiivToolsPromise;
+    return guardWriteTools("beehiiv", tools.filter(tool => toolList.has(tool.name)), BEEHIIV_WRITE_TOOLS);
 };

@@ -21,7 +21,7 @@ import { MODELS } from "../../models.js";
 import { ManagerAgentState, type AgentStateType } from "./state.js";
 import { managerTools } from "./tools.js";
 
-dotenv.config();
+// dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
 async function readConfig(path: string): Promise<string> {
   const content = await readFile(path, 'utf-8');

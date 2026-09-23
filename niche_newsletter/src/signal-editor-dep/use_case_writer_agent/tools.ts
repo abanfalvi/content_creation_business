@@ -9,9 +9,7 @@ import { tool, type ToolRuntime } from "@langchain/core/tools";
 import { join } from 'path';
 import { UseCaseWriterAgentState } from "./state.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
-
-const SCRATCH_PAD_DIR = "src/signal-editor-dep/use_case_writer_agent/scratch_pad/";
-const RESEARCH_SCRATCH_PAD_DIR = "src/signal-editor-dep/research_agent/scratch_pad/";
+import { dataPaths } from "../../shared/paths.js";
 
 const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
 
@@ -30,7 +28,7 @@ type YoutubeSearchResponse = {
 const readResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof UseCaseWriterAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const filePath = join(RESEARCH_SCRATCH_PAD_DIR, `${researchTopic}_notes.md`);
+        const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`);
         return await readOrInitFile(filePath);
     }, {
         name: "read_research_findings",
@@ -45,7 +43,7 @@ const getVideoTranscript = tool(
             console.log(`Fetched ${transcript.length} segments.`);
         
             const videoId = videoTitle.toLowerCase().replace(" ", "_");
-            const outDir = "src/signal-editor-dep/use_case_writer_agent/scratch_pad/";
+            const outDir = dataPaths.useCaseScratchPad();
             const outPath = join(outDir, `${videoId}_transcript.md`);
         
             const fullText = transcript.map((seg) => seg.text).join(" ");
@@ -181,7 +179,7 @@ const getVideoData = tool(
 const readHowTo = tool(
     async (_input, runtime: ToolRuntime<typeof UseCaseWriterAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const fullPath = join(SCRATCH_PAD_DIR, `${researchTopic}_use_cases.md`);
+        const fullPath = join(dataPaths.useCaseScratchPad(), `${researchTopic}_use_cases.md`);
         return await readOrInitFile(fullPath);
     }, {
         name: "read_how_to",
@@ -192,7 +190,7 @@ const readHowTo = tool(
 const editHowTo = tool(
     async ({ to_replace, replace_with }, runtime: ToolRuntime<typeof UseCaseWriterAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const fullPath = join(SCRATCH_PAD_DIR, `${researchTopic}_use_cases.md`);
+        const fullPath = join(dataPaths.useCaseScratchPad(), `${researchTopic}_use_cases.md`);
 
         const outcome = await applyFindAndReplace(fullPath, to_replace, replace_with);
         if (outcome.status === "not_found") {
@@ -216,7 +214,7 @@ const editHowTo = tool(
 const addContent = tool(
     async ({ content }, runtime: ToolRuntime<typeof UseCaseWriterAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const fullPath = join(SCRATCH_PAD_DIR, `${researchTopic}_use_cases.md`);
+        const fullPath = join(dataPaths.useCaseScratchPad(), `${researchTopic}_use_cases.md`);
         await appendFileEnsuringDir(fullPath, content);
 
         return "Your use-case write-up has been updated";

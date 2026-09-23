@@ -3,14 +3,21 @@
   "version": "1.0.0",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "niche_newsletter": "./bin/niche_newsletter.js"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "eval": "node --import tsx --import dotenv/config eval/run.ts",
+    "niche_newsletter": "node ./bin/niche_newsletter.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@types/figlet": "^1.7.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.5.0",
     "@types/react": "^19.3.0",
@@ -30,6 +37,7 @@
     "dotenv": "^17.4.2",
     "dropbox": "^10.46.0",
     "e2b": "^2.51.0",
+    "figlet": "^1.11.4",
     "glob": "^13.0.6",
     "gray-matter": "^4.0.3",
     "ink": "^7.1.1",

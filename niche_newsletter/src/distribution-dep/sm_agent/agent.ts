@@ -22,7 +22,7 @@ import { readFile } from 'fs/promises';
 import dotenv from 'dotenv';
 import { checkpointer } from "../checkpointer.js";
 
-dotenv.config();
+// dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
 async function readConfig(path: string): Promise<string> {
   const content = await readFile(path, 'utf-8');

@@ -2,8 +2,9 @@ import dotenv from 'dotenv';
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import { FileBackedOAuthProvider } from "../../shared/mcp_oauth_provider.js";
+import { guardWriteTools, BUFFER_WRITE_TOOLS } from "../../shared/eval_guard.js";
 
-dotenv.config();
+// dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
 export const SM_AGENT_APP_NAME = "niche-newsletter-sm-agent (canva)";
 
@@ -83,7 +84,7 @@ export async function getBufferTools(): Promise<DynamicStructuredTool[]> {
     try {
         const tools = await client.getTools();
 
-        return tools.filter(tool => KEEP_BUFFER_TOOLS.has(tool.name));
+        return guardWriteTools("buffer", tools.filter(tool => KEEP_BUFFER_TOOLS.has(tool.name)), BUFFER_WRITE_TOOLS);
     } catch (error) {
         console.error("Failed to load buffer MCP tools:", error);
         return [];

@@ -12,12 +12,13 @@ import { MODELS, opikHandler } from "../../models.js";
 import { ResearchAgentState, compressRubric } from "./state.js";
 import type { RubricType } from "./state.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile, writeFileEnsuringDir } from "../../shared/file_utils.js";
+import { dataPaths } from "../../shared/paths.js";
 import matter from "gray-matter";
 import { glob } from "glob";
 
 import dotenv from 'dotenv';
 
-dotenv.config();
+// dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
 const MIN_HISTORY_TO_COMPRESS = 6; // below this many older messages, compression isn't worth the summarization call
 
@@ -139,7 +140,7 @@ const compressContext = tool(
 const readScratchPad = tool(
     async (_input, runtime: ToolRuntime<typeof ResearchAgentState>) => {
         const researchTopic = runtime.state.researchTopic;
-        const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+        const path = dataPaths.researchScratchPad();
         const fullPath = join(path, `${researchTopic}_notes.md`);
         return await readOrInitFile(fullPath);
     }, {
@@ -151,7 +152,7 @@ const readScratchPad = tool(
 const editScratchPad = tool(
   async ({ to_replace, replace_with }, runtime: ToolRuntime<typeof ResearchAgentState>) => {
     const researchTopic = runtime.state.researchTopic;
-    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    const path = dataPaths.researchScratchPad();
     const fullPath = join(path, `${researchTopic}_notes.md`);
 
     const outcome = await applyFindAndReplace(fullPath, to_replace, replace_with);
@@ -176,7 +177,7 @@ const editScratchPad = tool(
 const addContent = tool(
   async ({ content }, runtime: ToolRuntime<typeof ResearchAgentState>) => {
     const researchTopic = runtime.state.researchTopic;
-    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    const path = dataPaths.researchScratchPad();
     const fullPath = join(path, `${researchTopic}_notes.md`);
     await appendFileEnsuringDir(fullPath, content);
 
@@ -220,7 +221,7 @@ This tool REPLACES the entire todo list with what you pass in — always include
 
 const readTodos = tool(
   async () => {
-    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    const path = dataPaths.researchScratchPad();
     const fullPath = join(path, "todos.json");
     return await readOrInitFile(fullPath, "[]");
   }, {
@@ -231,7 +232,7 @@ const readTodos = tool(
 
 const writeTodos = tool(
   async ({ todos }) => {
-    const path = "src/signal-editor-dep/research_agent/scratch_pad/";
+    const path = dataPaths.researchScratchPad();
     const fullPath = join(path, "todos.json");
     await writeFileEnsuringDir(fullPath, JSON.stringify(todos, null, 2));
 
@@ -247,7 +248,7 @@ const writeTodos = tool(
 
 const skimPreviousFindings = tool(
   async () => {
-    const prevNotes = await glob("**/*_notes.md", { cwd: "src/signal-editor-dep/research_agent/scratch_pad", absolute: true });
+    const prevNotes = await glob("**/*_notes.md", { cwd: dataPaths.researchScratchPad(), absolute: true });
     const contents: Record<string, any> = {};
     for (const note of prevNotes) {
       const topicName = basename(note, "_notes.md");
@@ -264,7 +265,7 @@ const skimPreviousFindings = tool(
 const readPreviousFinding = tool(
   async ({notesTopic, sameTopic}, runtime: ToolRuntime) => {
     const topic = notesTopic.toLowerCase().replace(" ", "_")
-    const fullPath = join("src/signal-editor-dep/research_agent/scratch_pad", `${topic}_notes.md`);
+    const fullPath = join(dataPaths.researchScratchPad(), `${topic}_notes.md`);
     let content: string;
     try {
         content = await readOrInitFile(fullPath);
