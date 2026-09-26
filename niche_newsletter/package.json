@@ -34,6 +34,7 @@
     "@react-pdf/renderer": "^4.9.0",
     "@tavily/core": "^0.7.11",
     "apify-client": "^2.25.0",
+    "deepagents": "^1.14.0",
     "dotenv": "^17.4.2",
     "dropbox": "^10.46.0",
     "e2b": "^2.51.0",

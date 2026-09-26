@@ -21,12 +21,19 @@ Judge each assertion independently, using only the run record below. An assertio
 "Write calls intercepted by the eval guard" were real attempts by the agent that were recorded instead of executed; treat them as the actions the agent took.
 Return one result per assertion.`;
 
-let judge: ReturnType<ChatOpenRouter['withStructuredOutput']> | null = null;
+type Verdict = z.infer<typeof verdictSchema>;
+type JudgeReply = { raw: { content: unknown; response_metadata?: Record<string, unknown> }; parsed: Verdict | null | undefined };
+
+// includeRaw: when the model answers in prose instead of calling the verdict tool (or its
+// reply is cut off), `parsed` is empty and the raw reply says why.
+let judge: { invoke(input: unknown): Promise<unknown> } | null = null;
 function getJudge() {
-    judge ??= new ChatOpenRouter({ model: JUDGE_MODEL, temperature: 0, maxTokens: 4096, maxRetries: 2 })
-        .withStructuredOutput(verdictSchema, { method: "functionCalling" });
+    judge ??= new ChatOpenRouter({ model: JUDGE_MODEL, temperature: 0, maxTokens: 15000, maxRetries: 2 })
+        .withStructuredOutput(verdictSchema, { method: "functionCalling", includeRaw: true });
     return judge;
 }
+
+const JUDGE_ATTEMPTS = 2;
 
 export class AssertionJudge extends BaseMetric {
     readonly validationSchema = z.object({
@@ -47,10 +54,25 @@ export class AssertionJudge extends BaseMetric {
         const task = message ?? JSON.stringify(handoff, null, 2);
         const numbered = assertions.map((assertion, i) => `${i + 1}. ${assertion}`).join("\n");
 
-        const verdict = (await getJudge().invoke([
+        const prompt = [
             { role: "system", content: JUDGE_INSTRUCTIONS },
             { role: "user", content: `# Case\n${description}\n\n# Task given to the agent\n${task}\n\n# Assertions\n${numbered}\n\n# Run record\n${output}` },
-        ])) as z.infer<typeof verdictSchema>;
+        ];
+        let verdict: Verdict | undefined;
+        let lastReply: JudgeReply | undefined;
+        for (let attempt = 0; attempt < JUDGE_ATTEMPTS && !verdict?.results; attempt++) {
+            lastReply = (await getJudge().invoke(prompt)) as JudgeReply;
+            verdict = lastReply.parsed ?? undefined;
+        }
+        if (!verdict?.results) {
+            const finish = lastReply?.raw.response_metadata?.finish_reason ?? "unknown";
+            const text = typeof lastReply?.raw.content === "string" ? lastReply.raw.content : JSON.stringify(lastReply?.raw.content ?? "");
+            return {
+                name: this.name,
+                value: 0,
+                reason: `Judge returned no verdict after ${JUDGE_ATTEMPTS} attempts (finish_reason: ${finish}; run record ${output.length} chars). Reply: ${text.slice(0, 300) || "(empty)"}`,
+            };
+        }
 
         const byIndex = new Map(verdict.results.map((result) => [result.index, result]));
         const failures: string[] = [];

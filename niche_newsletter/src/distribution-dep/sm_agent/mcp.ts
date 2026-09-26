@@ -1,12 +1,10 @@
 import dotenv from 'dotenv';
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { FileBackedOAuthProvider } from "../../shared/mcp_oauth_provider.js";
+import { getCanvaMCP } from "../../shared/canva_mcp.js";
 import { guardWriteTools, BUFFER_WRITE_TOOLS } from "../../shared/eval_guard.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
-
-export const SM_AGENT_APP_NAME = "niche-newsletter-sm-agent (canva)";
 
 const KEEP_BUFFER_TOOLS = new Set([
     'get_account',
@@ -56,10 +54,6 @@ const KEEP_CANVA_TOOLS = new Set([
 ]);
 
 const BUFFER_MCP_URL = "https://mcp.buffer.com/mcp";
-export const CANVA_MCP_URL = "https://mcp.canva.com/mcp";
-
-export const CANVA_REDIRECT_URL = "http://localhost:8789/oauth/callback";
-export const CANVA_TOKEN_STORE_PATH = "src/distribution-dep/sm_agent/.auth/canva_oauth.json";
 
 export async function getBufferTools(): Promise<DynamicStructuredTool[]> {
 
@@ -92,31 +86,5 @@ export async function getBufferTools(): Promise<DynamicStructuredTool[]> {
 };
 
 export async function getCanvaTools(): Promise<DynamicStructuredTool[]> {
-    const authProvider = new FileBackedOAuthProvider("canva", CANVA_REDIRECT_URL, CANVA_TOKEN_STORE_PATH, SM_AGENT_APP_NAME);
-
-    const savedTokens = await authProvider.tokens();
-    if (!savedTokens) {
-        console.warn(
-            "No saved Canva OAuth tokens found — skipping Canva MCP tools. Run the one-time setup once: " +
-            "npx tsx src/distribution-dep/sm_agent/setups/canva_oauth_setup.ts"
-        );
-        return [];
-    }
-
-    const client = new MultiServerMCPClient({
-        canva: {
-            transport: "http",
-            url: CANVA_MCP_URL,
-            authProvider,
-        },
-    });
-
-    try {
-        const tools = await client.getTools();
-
-        return tools.filter(tool => KEEP_CANVA_TOOLS.has(tool.name));
-    } catch (error) {
-        console.error("Failed to load canva MCP tools:", error);
-        return [];
-    }
+    return getCanvaMCP(KEEP_CANVA_TOOLS);
 };

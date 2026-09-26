@@ -1,5 +1,5 @@
 import { onRetry } from "../shared/on_error.js";
-
+import { z } from "zod";
 import {
     createAgent,
     toolCallLimitMiddleware,
@@ -13,7 +13,7 @@ import {
     type AnyAgentMiddleware,
 } from "langchain";
 import { ChatOpenRouter } from "@langchain/openrouter";
-import { ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
@@ -50,11 +50,41 @@ const modelCallRetryMiddleware = modelRetryMiddleware({
   onFailure: "continue",
 }) as AnyAgentMiddleware;
 
+const memoryPhaseMiddleware = createMiddleware({
+  name: "MemoryPhase",
+  stateSchema: z.object({ memoryPhase: z.boolean().default(false) }),
+
+  wrapModelCall: async (request, handler) => {
+    const tools = request.tools.filter( t =>
+      request.state.memoryPhase
+      ? t.name === "call_memory_management_agent"
+      : t.name !== "call_memory_management_agent"
+    );
+    return handler({...request, tools})
+  },
+
+  afterModel: {
+    canJumpTo: ["model"],
+    hook: (state) => {
+      const last = state.messages.at(-1) as AIMessage;
+      if (state.memoryPhase || last.tool_calls?.length) return;
+      return {
+        memoryPhase: true,
+        messages: [new HumanMessage(
+          "The task is finished. Decide whether anything from this run is worth saving to memory. " +
+          "If so, call call_memory_management_agent; otherwise reply 'nothing to save'.")],
+        jumpTo: "model"
+      }
+    }
+  }
+})
+
 
 export const orchestratorAgent = createAgent({
     model: orchestratorModel,
     tools: orchestratorTools,
     middleware: [
+        // memoryPhaseMiddleware,
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
     ],

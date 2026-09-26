@@ -10,14 +10,19 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { ImageGenerationRequestAspectRatio } from "@openrouter/sdk/models";
 import {z} from "zod";
 import { writeFile } from 'fs/promises';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const promptSchema = z.object({
     prompt: z.string().describe("The refined image-generation prompt"),
+    negative_prompt: z.string().describe("Prompt what to avoid when generating the image"),
 });
 
-const instruction = "Write an image generation prompt for generating an image about ";
+const instruction = "Write an image generation prompt for generating the logo for my newsletter business, be specific on how the logo should look like. I want a logo (no need for text in the picture, only some shapes) that truly represents a newsletter business can be used for branding: it shares content on AI news/latest developments and on techniques to help people upskill themselves in AI. \n Return your answer in the provided schema.";
 
 async function runAgent(instruction:string) {
+    
     try {
         const result = await OutreachAgent.invoke(
             {
@@ -32,7 +37,7 @@ async function runAgent(instruction:string) {
     }
 };
 
-const promptEngineer = new ChatOpenRouter({model: "dots-studio/dots-3-note-preview:free", maxTokens: 2048, maxRetries: 2}).withStructuredOutput(promptSchema, {method: "jsonSchema"});
+const promptEngineer = new ChatOpenRouter({model: "openai/gpt-6-luna", maxTokens: 2048, maxRetries: 2}).withStructuredOutput(promptSchema, {method: "functionCalling"});
 const openRouter = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
 
 async function imageGenerator(direction: string, fileName: string) {
@@ -41,10 +46,10 @@ async function imageGenerator(direction: string, fileName: string) {
     try {
         genResult = await openRouter.images.generate({
             imageGenerationRequest: {
-                model: MODELS.IMAGE_GENERATION_MODEL,
-                prompt: result.prompt,
+                model: "inclusionai/ming-image-0.1-design",
+                prompt: `${result.prompt}\n\nNegative prompt: ${result.negative_prompt}`,
                 n: 1,
-                aspectRatio: "1:1",
+                /// aspectRatio: "1:1",
                 outputFormat: "png",
             },
         });
@@ -61,7 +66,8 @@ async function imageGenerator(direction: string, fileName: string) {
         return "Image generation returned no image data.";
     }
     const imageBytes = Buffer.from(image.b64Json, "base64");
-    await writeFile(`asssets/${fileName}.png`, imageBytes)
+    await writeFile(`assets/${fileName}.png`, imageBytes)
+    return "Image has been generated"
 }
 console.log(await imageGenerator(instruction, "logo"))
 

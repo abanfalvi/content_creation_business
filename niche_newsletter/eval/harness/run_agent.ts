@@ -5,7 +5,7 @@ import { sideEffectLog, type SideEffect } from "../../src/shared/eval_guard.js";
 import { contentToText } from "../../src/tui/message_format.js";
 import type { AgentName, EvalProblem } from "../problems/types.js";
 import {
-    CLEAN_NOTES, LEAD_MAGNET_STRATEGY, NOTES_WITH_UNVERIFIED_CLAIM, RAW_NOTES_WITH_PLANTED_FLAWS, USE_CASES,
+    CLEAN_NOTES, LEAD_MAGNET_STRATEGY, MEMORY_TREE, dumpMemoryTree, memoryPath, NOTES_WITH_UNVERIFIED_CLAIM, RAW_NOTES_WITH_PLANTED_FLAWS, USE_CASES,
     notesPath, resetDataDirs, strategyPath, useCasesPath, writeFixture,
 } from "./fixtures.js";
 
@@ -20,11 +20,12 @@ const AGENTS: Record<AgentName, () => Promise<Invokable>> = {
     editor_agent: async () => (await import("../../src/signal-editor-dep/editor_agent/agent.js")).editorAgent as unknown as Invokable,
     sm_agent: async () => (await import("../../src/distribution-dep/sm_agent/agent.js")).SMAgent as unknown as Invokable,
     dig_prod_creator_agent: async () => (await import("../../src/curriculum-dep/dig_prod_creator_agent/agent.js")).DigProdCreationAgent as unknown as Invokable,
+    memory_agent: async () => (await import("../../src/memory_agent/agent.js")).memoryManageAgent as unknown as Invokable,
     system: async () => (await import("../../src/orchestrator/orchestrator.js")).orchestratorAgent as unknown as Invokable,
 };
 
 const TIMEOUT_MS = { standard: 10 * 60_000, expensive: 40 * 60_000 };
-const RECURSION_LIMIT = 80;
+const RECURSION_LIMIT = 250;
 const SECTION_LIMIT = 20_000;
 
 export type RunOutput = {
@@ -54,9 +55,10 @@ async function runProblemNow(problem: EvalProblem, runId: string): Promise<RunOu
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error(`timed out after ${TIMEOUT_MS[problem.cost] / 60_000} min`)), TIMEOUT_MS[problem.cost]);
 
+    const inputs = fixtureFiles(problem, topic);
     try {
         await resetDataDirs();
-        await seedFixture(problem, topic);
+        for (const input of inputs) await writeFixture(input.path, input.content);
         const agent = await AGENTS[problem.agent]();
         const result = await agent.invoke(buildInput(problem, topic), {
             configurable: { thread_id: `eval:${runId}:${problem.case_id}` },
@@ -64,30 +66,35 @@ async function runProblemNow(problem: EvalProblem, runId: string): Promise<RunOu
             signal: abort.signal,
         });
         const artifact = await readArtifact(problem, topic, result);
-        return summarize(problem, result, artifact, sideEffectLog.slice(effectsStart), null);
+        return summarize(problem, inputs, result, artifact, sideEffectLog.slice(effectsStart), null);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return summarize(problem, { messages: [] }, null, sideEffectLog.slice(effectsStart), message);
+        return summarize(problem, inputs, { messages: [] }, null, sideEffectLog.slice(effectsStart), message);
     } finally {
         clearTimeout(timer);
     }
 }
 
-async function seedFixture(problem: EvalProblem, topic: string): Promise<void> {
+type InputFile = { label: string; path: string; content: string };
+
+// The files seeded before the run. They're also shown to the judge, since assertions
+// often compare the agent's output against its source material (or the prior state).
+function fixtureFiles(problem: EvalProblem, topic: string): InputFile[] {
+    const notes = (content: string) => ({ label: "Research findings (notes file)", path: notesPath(topic), content });
     switch (problem.fixture) {
-        case "raw_notes": return writeFixture(notesPath(topic), RAW_NOTES_WITH_PLANTED_FLAWS);
-        case "clean_notes": return writeFixture(notesPath(topic), CLEAN_NOTES);
-        case "unverified_notes": return writeFixture(notesPath(topic), NOTES_WITH_UNVERIFIED_CLAIM);
-        case "notes_and_use_cases":
-            await writeFixture(notesPath(topic), CLEAN_NOTES);
-            return writeFixture(useCasesPath(topic), USE_CASES);
-        case "lead_magnet_strategy": return writeFixture(strategyPath(topic), LEAD_MAGNET_STRATEGY);
-        case undefined: return;
+        case "raw_notes": return [notes(RAW_NOTES_WITH_PLANTED_FLAWS)];
+        case "clean_notes": return [notes(CLEAN_NOTES)];
+        case "unverified_notes": return [notes(NOTES_WITH_UNVERIFIED_CLAIM)];
+        case "notes_and_use_cases": return [notes(CLEAN_NOTES), { label: "Use cases file", path: useCasesPath(topic), content: USE_CASES }];
+        case "lead_magnet_strategy": return [{ label: "Content strategy doc", path: strategyPath(topic), content: LEAD_MAGNET_STRATEGY }];
+        case "memory_tree":
+            return Object.entries(MEMORY_TREE).map(([relative, content]) => ({ label: `Memory /${relative}`, path: memoryPath(relative), content }));
+        default: return [];
     }
 }
 
 function buildInput(problem: EvalProblem, topic: string): Record<string, unknown> {
-    if (problem.agent === "system") {
+    if (problem.agent === "system" || problem.agent === "memory_agent") {
         return { messages: [new HumanMessage(problem.message ?? "")] };
     }
     const messages = [new HumanMessage({ content: JSON.stringify(problem.handoff) })];
@@ -110,6 +117,8 @@ async function readArtifact(problem: EvalProblem, topic: string, result: Record<
             const code = lastToolArgs(messagesOf(result), "create_document")?.code;
             return { label: "Last create_document script", content: typeof code === "string" ? code : "(create_document was never called)" };
         }
+        case "memory_agent":
+            return { label: "Memories folder after the run", content: await dumpMemoryTree() };
         default:
             return null;
     }
@@ -135,6 +144,7 @@ const clip = (text: string, limit = SECTION_LIMIT) => (text.length > limit ? `${
 
 function summarize(
     problem: EvalProblem,
+    inputs: InputFile[],
     result: Record<string, unknown>,
     artifact: { label: string; content: string } | null,
     effects: SideEffect[],
@@ -147,6 +157,9 @@ function summarize(
     const finalAi = [...messages].reverse().find((message) => message.getType() === "ai");
 
     const sections = [
+        inputs.length > 0
+            ? `## Input files seeded before the run (the agent's source material)\n${inputs.map((input) => `### ${input.label}\n${clip(input.content)}`).join("\n\n")}`
+            : null,
         `## Final message from the agent\n${finalAi ? clip(contentToText(finalAi.content)) || "(empty)" : "(none)"}`,
         artifact ? `## ${artifact.label}\n${clip(artifact.content)}` : null,
         error

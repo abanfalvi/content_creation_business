@@ -1,6 +1,6 @@
 // Capabilities: create the digital products (code generation), spawn subagents, generate images
 import { z } from "zod";
-import { tool, ToolMessage, type ToolRuntime } from "langchain";
+import { HumanMessage, tool, ToolMessage, type ToolRuntime } from "langchain";
 import type { DigProdCreationAgentState } from "./state.js";
 import { OpenRouter } from "@openrouter/sdk";
 import { MODELS } from "../../models.js";
@@ -10,6 +10,35 @@ import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { Sandbox, CommandExitError } from "e2b";
 import dotenv from 'dotenv';
 import { readOrInitFile } from "../../shared/file_utils.js";
+import { readFile } from "fs/promises";
+import { getCanvaMCP } from "../../shared/canva_mcp.js";
+
+export const KEEP_CANVA_TOOLS = new Set([   
+    'export-design',
+    'get-export-formats',
+    'get-design',
+    'get-design-pages',
+    'get-design-content',
+    'search-designs',
+    'import-design-from-url',
+    // 'copy-design',
+    // 'create-design-from-brand-template',
+    'upload-asset-from-url',
+    // 'resize-design',
+    // 'merge-designs',
+    'start-editing-transaction',
+    'perform-editing-operations',
+    'commit-editing-transaction',
+    'cancel-editing-transaction',
+    // 'get-design-thumbnail',
+    'search-brand-templates',
+    'get-brand-template-dataset',
+    "autofill-design",
+    'resolve-shortlink',
+    'get-assets',
+    // 'list-brand-kits',
+    'get-design-candidates',
+]);
 
 function toDirectDropboxUrl(shareUrl: string): string {
     const url = new URL(shareUrl);
@@ -53,7 +82,10 @@ async function uploadToDropboxAndGetShareUrl(dropboxToken: string, path: string,
 
 // Versions pinned to match this repo's own package.json, so scripts render the same way
 // inside the sandbox as they would with the repo's own installed dependencies.
-const REACT_PDF_SANDBOX_DEPS = "react@19.3.0 @react-pdf/renderer@4.9.0 tsx@4.23.13";
+// The @expo-google-fonts packages supply the static TTFs that kit.tsx registers.
+const REACT_PDF_SANDBOX_DEPS = "react@19.3.0 @react-pdf/renderer@4.9.0 tsx@4.23.13 @expo-google-fonts/inter@0.4.2 @expo-google-fonts/jetbrains-mono@0.4.1";
+// Pre-built design components, written next to the agent's script so it can import "./kit.tsx".
+const KIT_SOURCE = await readFile("src/curriculum-dep/dig_prod_creator_agent/kit.tsx", "utf-8");
 const SANDBOX_TSCONFIG = JSON.stringify({
     compilerOptions: { jsx: "react-jsx", module: "esnext", moduleResolution: "bundler", esModuleInterop: true },
 });
@@ -90,6 +122,7 @@ const createDocument = tool(
             await sandbox.files.write([
                 { path: "generate.tsx", data: code },
                 { path: "images.json", data: JSON.stringify(runtime.state.images ?? {}) },
+                { path: "kit.tsx", data: KIT_SOURCE },
                 ...(isReconnect ? [] : [
                     { path: "tsconfig.json", data: SANDBOX_TSCONFIG },
                     { path: "package.json", data: SANDBOX_PACKAGE_JSON },
@@ -147,7 +180,14 @@ const createDocument = tool(
                 update: {
                     sandboxId: sandbox.sandboxId,
                     pendingDocumentUrl: documentUrl,
-                    messages: [new ToolMessage({ content: `"${fileName}" rendered and hosted for review at ${documentUrl} — call finalize_document once it's been reviewed and approved.`, tool_call_id: runtime.toolCallId })],
+                    messages: [
+                        new ToolMessage({ content: [ 
+                            {type: "text", text: `"${fileName}" rendered and hosted for review at ${documentUrl} — call finalize_document once you have reviewed the document (attached) and are content with the result.`},
+                            ], tool_call_id: runtime.toolCallId }),
+                        new HumanMessage({content: [
+                            {type: "file", source_type: "base64", data: Buffer.from(pdfBytes).toString("base64"), mime_type: "application/pdf", metadata: { filename: `${name}.pdf` }}
+                        ]})
+                    ],
                 },
             });
         } catch (error) {
@@ -156,14 +196,17 @@ const createDocument = tool(
         }
     }, {
         name: "create_document",
-        description: `Render a PDF from a react-pdf (@react-pdf/renderer) TSX script, executed in an isolated E2B sandbox — not in this process. Doesn't host it — call finalize_document afterwards to submit it for review and, once approved, host it on Dropbox.
+        description: `Render a PDF from a react-pdf (@react-pdf/renderer) TSX script, executed in an isolated E2B sandbox — not in this process — and host the draft on Dropbox for review. Call finalize_document afterwards to submit it.
 
 "code" must be a complete, self-contained script that:
-- imports what it needs from "react" and "@react-pdf/renderer" (Document, Page, View, Text, Image, StyleSheet, etc.) — JSX is available (automatic runtime, no need to import React yourself).
+- builds the document from the design kit at "./kit.tsx" (written alongside your script). Import from it rather than styling from scratch:
+  - Shell and pages: KitDocument({title, author}), CoverPage({eyebrow, title, subtitle, author, edition, imageUrl}), ContentPage({docTitle, brand}) (flows onto new pages, with a running header, footer and page numbers), ChecklistPage({docTitle, brand, title, intro, items: [{title, detail}]}), CTAPage({eyebrow, heading, body, buttonLabel, url, footnote}).
+  - Blocks inside a ContentPage: SectionHeader({eyebrow, title, breakBefore}), H2, P, Lead, Strong (inline), Bullets({items}), Callout({tone: "note"|"tip"|"warning", title}), ExampleBlock({label}, children: string) (monospace, for prompts or templates), StatRow({stats: [{value, label}]}), Steps({steps: [{title, body}]}), Figure({src, caption, height}).
+  - theme (colors, fonts "Inter" and "JetBrains Mono", sizes), for occasional custom Views that should still match the kit.
 - ends by calling renderToFile(<YourDocument />, "output.pdf") — this exact call, this exact filename, or nothing comes back.
 - to embed a previously generated image, reads images.json (written alongside your script) and looks up the entry by the fileName you gave generate_image, e.g.: JSON.parse(readFileSync("images.json", "utf-8"))["hero-banner"].imageUrl — don't guess a URL, look it up.
 
-The sandbox only has react, @react-pdf/renderer, tsx, and Node's built-in modules available — no other npm packages. If finalize_document comes back rejected, call this again with fixed code — it reconnects to the same sandbox instead of starting over, so dependencies don't need reinstalling.`,
+The sandbox only has react, @react-pdf/renderer, tsx, the kit's fonts, and Node's built-in modules available — no other npm packages. If finalize_document comes back rejected, call this again with fixed code — it reconnects to the same sandbox instead of starting over, so dependencies don't need reinstalling.`,
         schema: z.object({
             fileName: z.string().describe("Short name for the document — used for its Dropbox filename and as its key for later reference. Pass the same fileName to finalize_document."),
             code: z.string().describe("A complete, self-contained react-pdf TSX script — see the tool description for the exact contract it must follow."),
@@ -209,7 +252,7 @@ const finalizeDocument = tool(
 
 const genImage = tool(
     async ({ prompt, aspectRatio, fileName }, runtime: ToolRuntime<typeof DigProdCreationAgentState>) => {
-        const name = fileName.toLowerCase().replace(" ", "_")
+        const name = fileName.toLowerCase().replace(/\s+/g, "_");
         
         const openRouterKey = process.env.OPENROUTER_API_KEY;
         if (!openRouterKey) {
@@ -287,4 +330,6 @@ const proposedDocumentContent = tool(
     }
 )
 
-export const productCreationTools = [genImage, createDocument, finalizeDocument, proposedDocumentContent];
+const canvaTools = await getCanvaMCP(KEEP_CANVA_TOOLS);
+
+export const productCreationTools = [genImage, createDocument, finalizeDocument, proposedDocumentContent, ...canvaTools];

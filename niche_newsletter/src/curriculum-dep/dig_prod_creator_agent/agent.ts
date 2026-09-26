@@ -1,6 +1,6 @@
 import { MODELS } from "../../models.js";
 import { DigProdCreationAgentState, type AgentStateType } from "./state.js";
-import { productCreationTools } from "./tools.js";
+import { KEEP_CANVA_TOOLS, productCreationTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
 
 import {
@@ -14,6 +14,7 @@ import {
     piiMiddleware,
     toolErrorMiddleware,
     type AnyAgentMiddleware,
+    type ToolRuntime,
 } from "langchain";
 import { ChatOpenRouter } from "@langchain/openrouter";
 import { ToolMessage } from "@langchain/core/messages";
@@ -78,6 +79,21 @@ const reviewGateMiddleware = createMiddleware({
   },
 });
 
+const toolsConfig = createMiddleware({
+  name: "configure_available_tools_middleware",
+  stateSchema: DigProdCreationAgentState,
+  tools: productCreationTools,
+
+  wrapModelCall: async (request, handler) => {
+    if (request.state.useCanva) return handler(request)
+    return handler({
+      ...request,
+      tools: request.tools.filter(tool => !KEEP_CANVA_TOOLS.has((tool as { name: string }).name)),
+      systemPrompt: `${SYSTEM_PROMPT}\n\n Note on change: Canva tools have been added to your list of tools. Use it if needed to create the document or edit an existing one.`
+    })
+  }
+})
+
 export const DigProdCreationAgent = createAgent({
     model: DigProdCreationModel,
     tools: productCreationTools,
@@ -85,7 +101,7 @@ export const DigProdCreationAgent = createAgent({
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
         reviewGateMiddleware,
-        // toolsConfig
+        toolsConfig
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: DigProdCreationAgentState,

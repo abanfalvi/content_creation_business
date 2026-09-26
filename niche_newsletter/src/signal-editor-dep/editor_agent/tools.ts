@@ -142,11 +142,18 @@ const createChart = tool(
         if (width !== undefined) myChart.setWidth(width);
         if (height !== undefined) myChart.setHeight(height);
         if (backgroundColor !== undefined) myChart.setBackgroundColor(backgroundColor);
-        
+
+        let chartUrl;
+        try {
+            chartUrl = await myChart.getShortUrl();
+        } catch {
+            return "Failed: No chart was generated!";
+        }
+
         return new Command({
             update: {
-                messages: [new ToolMessage({ content: "Chart has been created.", tool_call_id: runtime.toolCallId })],
-                chartUrl: myChart.getUrl()
+                messages: [new ToolMessage({ content: `Chart has been created: ${chartUrl}`, tool_call_id: runtime.toolCallId })],
+                chartUrl
             },
         });
     }, {
@@ -251,17 +258,17 @@ const generateImages = tool(
         try {
             const shareResult = await dropbox.sharingCreateSharedLinkWithSettings({
                 path: uploadedPath,
-                settings: { audience: { '.tag': 'public' } },
             });
             shareUrl = shareResult.result.url;
         } catch (error) {
             // A shared link may already exist for this path (e.g. a retried call) — Dropbox
             // reports that as an error carrying the existing link, which is just as usable.
-            // The SDK already unwraps the response to the tagged-union error (`.error`), and
-            // types `shared_link_already_exists` as a generic `Object`; `metadata.url` below
-            // is the shape Dropbox's API actually returns for this case.
+            // The SDK's `.error` is the whole response body, so the tagged-union error is at
+            // `.error.error`. Dropbox only includes the existing link's metadata when no custom
+            // settings were sent, which is why `settings` is left out above.
             const existingUrl = (error instanceof DropboxResponseError
-                ? (error.error as { shared_link_already_exists?: { metadata?: { url?: string } } })?.shared_link_already_exists?.metadata?.url
+                ? (error.error as { error?: { shared_link_already_exists?: { metadata?: { url?: string } } } })
+                    ?.error?.shared_link_already_exists?.metadata?.url
                 : undefined);
             if (!existingUrl) {
                 return `Dropbox share-link creation failed: ${error}`;
@@ -271,7 +278,7 @@ const generateImages = tool(
         const imgUrl = JSON.stringify({ imageUrl: toDirectDropboxUrl(shareUrl), prompt });
         return new Command({
             update: {
-                messages: [new ToolMessage({ content: "Image has been saved successfully.", tool_call_id: runtime.toolCallId })],
+                messages: [new ToolMessage({ content: `Image has been saved successfully: ${imgUrl}`, tool_call_id: runtime.toolCallId })],
                 imageUrl: imgUrl
             },
         });

@@ -1,9 +1,10 @@
 import type { BaseMessage } from "@langchain/core/messages";
+import type { ProgressEvent } from "../shared/progress_update.js";
 
 export type ChatRole = "user" | "assistant" | "tool" | "status" | "error";
-export type ChatEntryDraft = { role: ChatRole; text: string };
+export type ChatEntryDraft = { role: ChatRole; text: string; depth?: number; agent?: string };
 
-const TOOL_RESULT_PREVIEW_LENGTH = 400;
+const TOOL_ARGS_PREVIEW_LENGTH = 120;
 
 export function contentToText(content: unknown): string {
     if (typeof content === "string") return content;
@@ -27,22 +28,17 @@ export function messagesToEntries(messages: BaseMessage[]): ChatEntryDraft[] {
     const entries: ChatEntryDraft[] = [];
 
     for (const message of messages) {
-        const type = message.getType();
+        const type = message.type;
 
         if (type === "ai") {
             const toolCalls = (message as unknown as { tool_calls?: Array<{ name: string; args: unknown }> }).tool_calls;
             for (const call of toolCalls ?? []) {
-                entries.push({ role: "status", text: `→ calling ${call.name}(${JSON.stringify(call.args)})` });
+                const args = JSON.stringify(call.args) ?? "";
+                const preview = args.length > TOOL_ARGS_PREVIEW_LENGTH ? `${args.slice(0, TOOL_ARGS_PREVIEW_LENGTH)}…` : args;
+                entries.push({ role: "status", text: `→ calling ${call.name}(${preview})` });
             }
             const text = contentToText(message.content).trim();
             if (text) entries.push({ role: "assistant", text });
-        } else if (type === "tool") {
-            const name = (message as unknown as { name?: string }).name;
-            const text = contentToText(message.content).trim();
-            const preview = text.length > TOOL_RESULT_PREVIEW_LENGTH
-                ? `${text.slice(0, TOOL_RESULT_PREVIEW_LENGTH)}…`
-                : text;
-            entries.push({ role: "tool", text: `${name ? `${name} → ` : ""}${preview}` });
         } else if (type === "human") {
             const text = contentToText(message.content).trim();
             if (text) entries.push({ role: "user", text });
@@ -50,4 +46,17 @@ export function messagesToEntries(messages: BaseMessage[]): ChatEntryDraft[] {
     }
 
     return entries;
+}
+
+export function progressEventToEntry(event: ProgressEvent): ChatEntryDraft {
+    const base = { depth: event.path.length, agent: event.agent };
+    switch (event.type) {
+        case "agent_start": return { ...base, role: "status", text: `▶ ${event.agent} started` };
+        case "agent_end": return { ...base, role: "status", text: `■ ${event.agent} finished` };
+        case "tool_call": {
+            const args = JSON.stringify(event.args) ?? "";
+            const preview = args.length > TOOL_ARGS_PREVIEW_LENGTH ? `${args.slice(0, TOOL_ARGS_PREVIEW_LENGTH)}…` : args;
+            return { ...base, role: "tool", text: `→ ${event.name}(${preview})` };
+        }
+    }
 }

@@ -1,12 +1,13 @@
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { writeFileEnsuringDir } from "../../src/shared/file_utils.js";
 import { dataPaths } from "../../src/shared/paths.js";
 
 export const notesPath = (topic: string) => join(dataPaths.researchScratchPad(), `${topic}_notes.md`);
 export const useCasesPath = (topic: string) => join(dataPaths.useCaseScratchPad(), `${topic}_use_cases.md`);
 export const strategyPath = (name: string) => join(dataPaths.contentStrategy(), `${name}.md`);
+export const memoryPath = (relative: string) => join(dataPaths.memories(), relative);
 
 // Findings 1, 2 and 6 are keepers (6 is hype-padded and lacks a how-to, so it should be
 // salvaged, not cut). 3 duplicates 1, 4 is unsourced, 5 is off-topic.
@@ -120,6 +121,69 @@ Must cover:
 Tone: practical, no hype. End with a call to action to subscribe to the newsletter.
 `;
 
+// A small, well-organized memories tree. Send day is Tuesday (for the "outdated" case),
+// the length memory has a sibling in /audience (for the "duplicate" case), and nothing
+// covers sponsors (for the "nothing relevant" case).
+export const MEMORY_TREE: Record<string, string> = {
+    "audience/issue_length.md": `---
+name: issue_length
+description: Readers drop off after ~1,500 words — keep issues under that
+updated: 2026-06-10
+valid_from: 2026-06-10
+valid_until: null
+superseded_by: null
+---
+
+Issues over 1,500 words had a 20% lower click-through rate than shorter ones (May 2026 analytics). Keep each issue under 1,500 words.
+`,
+    "audience/reader_roles.md": `---
+name: reader_roles
+description: Who reads the newsletter — mostly engineers at small AI teams
+updated: 2026-05-02
+valid_from: 2026-05-02
+valid_until: null
+superseded_by: null
+---
+
+The April 2026 reader survey: 62% software engineers, 21% founders, 17% product managers. Most work on teams of under 10 people.
+`,
+    "publishing/send_schedule.md": `---
+name: send_schedule
+description: Issues are sent every Tuesday at 08:00 UTC
+updated: 2026-03-01
+valid_from: 2026-03-01
+valid_until: null
+superseded_by: null
+---
+
+The newsletter goes out every Tuesday at 08:00 UTC.
+`,
+    "style/no_hype_words.md": `---
+name: no_hype_words
+description: Banned hype words (game-changing, revolutionary, etc.) in all published copy
+updated: 2026-04-15
+valid_from: 2026-04-15
+valid_until: null
+superseded_by: null
+---
+
+Never use "game-changing", "revolutionary", "jaw-dropping" or "changes everything" in issues or social posts. Readers flagged these as a reason for distrust.
+`,
+};
+
+// Every memory file with its full content, so the judge sees the tree the agent left behind.
+export async function dumpMemoryTree(): Promise<string> {
+    const root = dataPaths.memories();
+    const files = (await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isFile())
+        .map((entry) => join(entry.parentPath, entry.name));
+    if (files.length === 0) return "(the memories folder is empty)";
+    const sections = await Promise.all(files.sort().map(async (file) =>
+        `### /${relative(root, file).split(sep).join("/")}\n${await readFile(file, "utf-8")}`,
+    ));
+    return sections.join("\n");
+}
+
 export async function writeFixture(path: string, content: string): Promise<void> {
     await writeFileEnsuringDir(path, content);
 }
@@ -140,11 +204,11 @@ export async function createDataRoot(): Promise<string> {
     return root;
 }
 
-// Runs before every case so each starts from empty scratch pads and strategy docs.
+// Runs before every case so each starts from empty scratch pads, strategy docs and memories.
 // Checkpoint databases are left alone: they stay open for the whole process, and each
 // case uses its own thread_id anyway.
 export async function resetDataDirs(): Promise<void> {
-    for (const dir of [dataPaths.researchScratchPad(), dataPaths.useCaseScratchPad(), dataPaths.contentStrategy()]) {
+    for (const dir of [dataPaths.researchScratchPad(), dataPaths.useCaseScratchPad(), dataPaths.contentStrategy(), dataPaths.memories()]) {
         await rm(dir, { recursive: true, force: true });
         await mkdir(dir, { recursive: true });
     }

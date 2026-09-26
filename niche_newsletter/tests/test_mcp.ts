@@ -2,7 +2,7 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { DynamicStructuredTool } from "langchain";
 import dotenv from 'dotenv';
 import { FileBackedOAuthProvider } from "../src/shared/mcp_oauth_provider.js";
-import { CANVA_REDIRECT_URL, CANVA_TOKEN_STORE_PATH, SM_AGENT_APP_NAME } from "../src/distribution-dep/sm_agent/mcp.js";
+import { CANVA_REDIRECT_URL, CANVA_TOKEN_STORE_PATH, CANVA_MCP_APP_NAME } from "../src/shared/canva_mcp.js";
 
 async function getBufferTools(): Promise<DynamicStructuredTool[]> {
 
@@ -39,7 +39,7 @@ async function getBufferTools(): Promise<DynamicStructuredTool[]> {
 };
 
 async function getCanvaTools(): Promise<DynamicStructuredTool[]> {
-    const authProvider = new FileBackedOAuthProvider("canva", CANVA_REDIRECT_URL, CANVA_TOKEN_STORE_PATH, SM_AGENT_APP_NAME);
+    const authProvider = new FileBackedOAuthProvider("canva", CANVA_REDIRECT_URL, CANVA_TOKEN_STORE_PATH, CANVA_MCP_APP_NAME);
 
     const savedTokens = await authProvider.tokens();
     if (!savedTokens) {

@@ -106,7 +106,7 @@ const callResearchAgent = tool(
                 messages: [new HumanMessage(`${instruction} Current date: ${new Date().toDateString()}`)],
                 researchTopic: runtime.state.researchTopic
             },
-            { callbacks: [opikHandler], recursionLimit: 100 }
+            { callbacks: [opikHandler], recursionLimit: 200 }
         );
         return result.messages.at(-1)?.content
     }, {

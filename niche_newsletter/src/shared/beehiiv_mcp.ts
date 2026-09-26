@@ -6,7 +6,7 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import { FileBackedOAuthProvider } from "./mcp_oauth_provider.js";
-import { guardWriteTools, BEEHIIV_WRITE_TOOLS } from "./eval_guard.js";
+import { guardWriteTools, BEEHIIV_WRITE_TOOLS, BEEHIIV_MOCK_READS } from "./eval_guard.js";
 
 export const BEEHIIV_MCP_APP_NAME = "niche-newsletter";
 
@@ -55,5 +55,5 @@ export async function getBeehiivMCP(toolList: Set<string>): Promise<DynamicStruc
     }
 
     const tools = await beehiivToolsPromise;
-    return guardWriteTools("beehiiv", tools.filter(tool => toolList.has(tool.name)), BEEHIIV_WRITE_TOOLS);
+    return guardWriteTools("beehiiv", tools.filter(tool => toolList.has(tool.name)), BEEHIIV_WRITE_TOOLS, { idPrefix: "post_", mockReads: BEEHIIV_MOCK_READS });
 };

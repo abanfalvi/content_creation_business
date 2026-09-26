@@ -5,6 +5,7 @@ export type AgentName =
     | "editor_agent"
     | "sm_agent"
     | "dig_prod_creator_agent"
+    | "memory_agent"
     | "system";
 
 export type HandoffContract = {
@@ -14,7 +15,7 @@ export type HandoffContract = {
     deliverables: string[];
 };
 
-export type Fixture = "raw_notes" | "clean_notes" | "unverified_notes" | "notes_and_use_cases" | "lead_magnet_strategy";
+export type Fixture = "raw_notes" | "clean_notes" | "unverified_notes" | "notes_and_use_cases" | "lead_magnet_strategy" | "memory_tree";
 
 export type EvalProblem = {
     case_id: string;
@@ -24,7 +25,8 @@ export type EvalProblem = {
     cost: "standard" | "expensive";
     description: string;
     // Specialists receive a handoff contract, exactly as their manager sends it; the
-    // system suite receives a user message to the orchestrator.
+    // system suite receives a user message to the orchestrator, and memory_agent the
+    // plain-text request its callers send.
     handoff?: HandoffContract;
     message?: string;
     fixture?: Fixture;

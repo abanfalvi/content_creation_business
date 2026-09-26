@@ -1,7 +1,7 @@
 // Usage:
 //   npx tsx --import dotenv/config eval/run.ts [suite...] [--include-expensive] [--case <case_id>] [--threshold 0.8] [--min-pass-rate 0.8]
 // Suites: research_agent, rel_filter_agent, use_case_writer_agent, editor_agent, sm_agent,
-// dig_prod_creator_agent, system, specialists, all (default).
+// dig_prod_creator_agent, memory_agent, system, specialists, all (default).
 
 import { Opik, evaluate } from "opik";
 import { MODELS } from "../src/models.js";
@@ -17,7 +17,7 @@ import type { AgentName, EvalProblem } from "./problems/types.js";
 process.env.EVAL_MODE = "1";
 
 const PROJECT_NAME = "niche_newsletter";
-const SPECIALISTS: AgentName[] = ["research_agent", "rel_filter_agent", "use_case_writer_agent", "editor_agent", "sm_agent", "dig_prod_creator_agent"];
+const SPECIALISTS: AgentName[] = ["research_agent", "rel_filter_agent", "use_case_writer_agent", "editor_agent", "sm_agent", "dig_prod_creator_agent", "memory_agent"];
 
 function parseArgs(argv: string[]) {
     const suites: string[] = [];

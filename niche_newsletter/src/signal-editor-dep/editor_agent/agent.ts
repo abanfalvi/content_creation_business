@@ -35,7 +35,11 @@ const editorModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/editor_agent/SYSTEM_PROMPT.md")
+if (!process.env.BEEHIIV_PUBLICATION_ID) {
+    throw new Error("BEEHIIV_PUBLICATION_ID is not set — add it to .env (find it with beehiiv's list_publications).");
+}
+const SYSTEM_PROMPT = (await readConfig("src/signal-editor-dep/editor_agent/SYSTEM_PROMPT.md"))
+    .replaceAll("{{BEEHIIV_PUBLICATION_ID}}", process.env.BEEHIIV_PUBLICATION_ID);
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,

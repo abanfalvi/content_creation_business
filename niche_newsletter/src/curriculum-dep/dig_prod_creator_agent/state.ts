@@ -12,6 +12,7 @@ const generatedImage = z.object({
 export const DigProdCreationAgentState = z.object({
   messages: z.array(z.custom<BaseMessage>()).default([]).register(registry, MessagesZodMeta as Parameters<typeof registry.add>[1]),
   doc_content_path: z.string(),
+  useCanva: z.boolean().default(false),
   images: z.record(z.string(), generatedImage).default({}),
   documents: z.record(z.string(), z.string()).default({}),
   sandboxId: z.string().optional(),

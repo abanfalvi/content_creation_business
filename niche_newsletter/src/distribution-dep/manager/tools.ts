@@ -6,6 +6,7 @@ import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { type AgentStateType, smPostRubric } from "./state.js";
 import type { SMPostRubricType } from "./state.js";
 import { getNotionMCP } from "../../shared/notion_mcp.js";
+import { streamAgents } from "../../shared/progress_update.js";
 
 const KEEP_NOTION_TOOLS = new Set([
     "notion-search",
@@ -119,9 +120,12 @@ const callSMAgent = tool(
         const { SMAgent } = await import("../sm_agent/agent.js");
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${managerThreadId ?? "unknown"}:sm_agent`;
-        const result = await SMAgent.invoke(
+        const result = await streamAgents(
+            SMAgent, 
+            "social_media_agent",
             { messages: [new HumanMessage({content: JSON.stringify(instruction)})] },
-            { configurable: { thread_id: threadId } }
+            threadId,
+            runtime
         );
 
         if (isInterrupted(result)) {

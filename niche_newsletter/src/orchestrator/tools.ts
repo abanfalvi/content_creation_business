@@ -13,6 +13,8 @@ import { basename, join } from "path";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../shared/file_utils.js";
 import { getBeehiivMCP } from "../shared/beehiiv_mcp.js";
 import { dataPaths } from "../shared/paths.js";
+import { saveIntoMemories } from "../shared/call_memory_agent.js";
+import { streamAgents } from "../shared/progress_update.js";
 
 function lastMessageContent(result: { messages: { content: unknown }[] }): string {
     const last = result.messages.at(-1);
@@ -33,6 +35,8 @@ const KEEP_BEEHIIV_TOOLS = new Set([
 
     "get_referral_program",
     "list_recommendations",
+
+    "list_publications"
 ])
 
 const handoffContract = z.object({
@@ -48,10 +52,8 @@ const callEditorManager = tool(
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:editor_manager`
         const topic = researchTopic.toLowerCase().replace(" ", "_")
-        const result = await editorManagerAgent.invoke(
-            {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: step},
-            { configurable: { thread_id: threadId } }
-        )
+        const input = {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: step}
+        const result = await streamAgents(editorManagerAgent, "editor_manager", input, threadId, runtime);
         return result.messages.at(-1)?.content
     }, {
         name: "call_editor_manager_agent",
@@ -68,10 +70,13 @@ const callDistributionManager = tool(
     async ({instruction}, runtime: ToolRuntime<AgentStateType>) => {
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:distribution_manager`
-        const result = await distributionManagerAgent.invoke(
+        const result = await streamAgents(
+            distributionManagerAgent, 
+            "distribution_manager",
             {messages: [new HumanMessage({content: instruction})]},
-            { configurable: { thread_id: threadId } }
-        )
+            threadId,
+            runtime
+        );
         return result.messages.at(-1)?.content
     }, {
         name: "call_distribution_manager_agent",
@@ -88,10 +93,13 @@ const calDigProdCreationAgent = tool(
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:dig_prod_creation_agent`
         const fullPath = join(dataPaths.contentStrategy(), `${doc_content_strategy_name.toLocaleLowerCase().replace(" ", "_")}.md`)
-        const result = await DigProdCreationAgent.invoke(
+        const result = await streamAgents(
+            DigProdCreationAgent, 
+            "digital_product_creation_agent",
             {messages: [new HumanMessage({content: JSON.stringify(instruction)})], doc_content_path: fullPath},
-            { configurable: { thread_id: threadId } }
-        )
+            threadId,
+            runtime
+        );
         return new Command({
             update: {
                 messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
@@ -292,6 +300,19 @@ const extractWebContent = tool(
     }
 );
 
+const callMemoryManageAgent = tool(
+    async ({whatToSave}, runtime: ToolRuntime<AgentStateType>) => {
+        const messages = runtime.state.messages;
+        return await saveIntoMemories(whatToSave, messages);
+    }, {
+        name: "call_memory_management_agent",
+        description: "Save lessons, decisions, and user preferences worth keeping beyond this conversation to long-term memory. Not for content strategy.",
+        schema: z.object({
+            whatToSave: z.array(z.string()).describe("List of short descriptions from the interactions that should be saved for long-term")
+        })
+    }
+);
+
 // const alphaxivTools = await getAlphaxivTools();
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
@@ -307,5 +328,6 @@ export const orchestratorTools = [
     editContentStrategy,
     addToContentStrategy,
     searchContentStrategy,
+    callMemoryManageAgent,
     ...beehiivTools
 ];

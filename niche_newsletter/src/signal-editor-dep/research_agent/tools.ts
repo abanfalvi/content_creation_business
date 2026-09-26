@@ -364,7 +364,7 @@ const spawnSubAgent = tool(
     researchSubAgent
       .invoke(
         { messages: [new HumanMessage(instruction)] },
-        { callbacks: [opikHandler], recursionLimit: 50 },
+        { callbacks: [opikHandler], recursionLimit: 75 },
       )
       .then((result) => {
         const messages = result.messages as BaseMessage[];

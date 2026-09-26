@@ -82,7 +82,7 @@ export const specialistProblems: EvalProblem[] = [
             "Every remaining finding still has its source URL.",
             "The file has a YAML index block at the top covering the findings.",
         ],
-        required_tools: ["read_research_findings"],
+        required_tools: ["read_research_findings", "add_summaries"],
         forbidden_tools: ["call_research_agent"],
     },
 
@@ -191,16 +191,19 @@ export const specialistProblems: EvalProblem[] = [
         case_id: "sm_finds_channel_first",
         agent: "sm_agent",
         cost: "standard",
-        description: "No channel ID is given; the agent must look channels up instead of guessing.",
+        description: "Lead-magnet announcement on Instagram at a fixed time, with no channel ID given; the agent must look channels up and follow Instagram's conventions.",
         handoff: {
             task_id: "eval-sm-2",
-            objectives: ["Create an X/Twitter post announcing a new free checklist: 'The LLM Output Validation Checklist'"],
-            constraints: ["Add it to the queue, do not publish immediately"],
-            deliverables: ["A queued post"],
+            objectives: ["Create an Instagram post announcing a new free lead magnet: 'The LLM Output Validation Checklist', downloadable from the link in our bio"],
+            constraints: ["Schedule it for 2026-10-02 at 15:00 UTC, do not publish immediately", "Instagram only"],
+            deliverables: ["A scheduled Instagram post with an on-brand image"],
         },
         assertions: [
             "The agent looked up the available channels before creating the post rather than guessing a channel ID.",
-            "The pending post fits X/Twitter's length limits and mentions the checklist.",
+            "The pending post targets an Instagram channel and no other channel.",
+            "The pending post is scheduled for 2026-10-02 at 15:00 UTC (or the same instant in another time zone), not queued for the next free slot or published immediately.",
+            "The pending post's caption announces the free checklist and directs readers to the link in bio, rather than relying on a URL pasted into the caption (Instagram captions don't make links clickable).",
+            "The pending post includes an image asset, since Instagram posts require media.",
         ],
         required_tools: ["list_channels"],
         expects_interrupt: true,
@@ -228,5 +231,93 @@ export const specialistProblems: EvalProblem[] = [
         ],
         required_tools: ["read_proposed_document_content", "create_document"],
         expects_interrupt: true,
+    },
+
+    // ------------------------------------------------------------------ memory_agent
+    // Messages mirror what saveIntoMemories sends: what to save plus a run transcript.
+    {
+        case_id: "memory_store_new_fact",
+        agent: "memory_agent",
+        cost: "standard",
+        description: "A new reader-demographics fact; its only sensible home is /audience, beside reader_roles.",
+        fixture: "memory_tree",
+        message: `Save the described informations (Where our readers are located) from this list of messages from the executions of an agent:
+human: Where are our subscribers based?
+ai: Per the September 2026 subscriber export: 41% United States, 27% European Union, 14% India, 18% rest of world.`,
+        assertions: [
+            "The reader location breakdown (41% US, 27% EU, 14% India, 18% rest of world, September 2026) is stored under /audience, either as a new file or merged into /audience/reader_roles.md.",
+            "If a new file was created, it has YAML frontmatter with name, description, updated, valid_from, valid_until and superseded_by fields, valid_until is null, and its description states what the memory holds (reader locations) rather than a vague label.",
+            "If it was merged into /audience/reader_roles.md, that file's description now also covers reader locations and its updated date was bumped past 2026-05-02.",
+            "The location data is not stored under /publishing, /style, or any other folder outside /audience.",
+            "The other seeded memories (issue length, send schedule, hype words) are unchanged, and the reader-role percentages are still present.",
+        ],
+        required_tools: ["context_search"],
+    },
+    {
+        case_id: "memory_merge_duplicate",
+        agent: "memory_agent",
+        cost: "standard",
+        description: "New info that extends an existing memory must be merged into it, not stored as a duplicate.",
+        fixture: "memory_tree",
+        message: `Save the described informations (Updated findings on issue length) from this list of messages from the executions of an agent:
+human: Anything new on how long issues should be?
+ai: August 2026 analytics confirm the 1,500-word ceiling, and add that issues between 800 and 1,200 words had the highest click-through rate of all.`,
+        assertions: [
+            "/audience/issue_length.md now also records that 800-1,200-word issues had the highest click-through rate (August 2026).",
+            "/audience/issue_length.md still states the 1,500-word ceiling.",
+            "There is exactly one memory file about issue length; no second, overlapping file was created.",
+            "The updated field of /audience/issue_length.md was bumped to a date later than 2026-06-10.",
+        ],
+        required_tools: ["context_search", "edit_file"],
+        forbidden_tools: ["write_file"],
+    },
+    {
+        case_id: "memory_supersede_outdated",
+        agent: "memory_agent",
+        cost: "standard",
+        description: "A change that makes a memory stop being true: keep the old one as history, don't overwrite it.",
+        fixture: "memory_tree",
+        message: `Save the described informations (The new send schedule) from this list of messages from the executions of an agent:
+human: We're switching sends to Thursdays at 08:00 UTC starting 2026-09-01 because Tuesday open rates dropped.
+ai: Understood — from 2026-09-01 issues go out every Thursday at 08:00 UTC.`,
+        assertions: [
+            "The current send schedule is recorded as Thursday at 08:00 UTC, valid from 2026-09-01.",
+            "The Tuesday schedule was not erased: it is kept either as an outdated memory file, or in a '## History' section with its validity period.",
+            "If the Tuesday schedule is kept as a separate outdated file, its frontmatter sets valid_until to 2026-09-01 (or the day before), sets superseded_by to the new file's path, and its description starts with '[OUTDATED'.",
+            "The reason for the change (Tuesday open rates dropped) is recorded.",
+            "No memory still presents Tuesday as the current send day.",
+        ],
+        required_tools: ["context_search"],
+    },
+    {
+        case_id: "memory_retrieve",
+        agent: "memory_agent",
+        cost: "standard",
+        description: "Read-only lookup: answer from the stored memories, with paths, without changing anything.",
+        fixture: "memory_tree",
+        message: "What do we know about our readers and the ideal issue length? Answer from the stored memories.",
+        assertions: [
+            "The final message states that most readers are software engineers (about 62%) on small teams.",
+            "The final message states that issues should stay under 1,500 words.",
+            "The final message cites /audience/reader_roles.md and /audience/issue_length.md by path.",
+            "The memories folder is unchanged: exactly the four seeded files, with their original content.",
+        ],
+        required_tools: ["context_search"],
+        forbidden_tools: ["write_file", "edit_file", "move_item"],
+    },
+    {
+        case_id: "memory_retrieve_nothing_relevant",
+        agent: "memory_agent",
+        cost: "standard",
+        description: "No memory covers the question; the agent must say so rather than stretch an unrelated one.",
+        fixture: "memory_tree",
+        message: "What rate do we charge sponsors for a placement in the newsletter? Answer from the stored memories.",
+        assertions: [
+            "The final message says plainly that no stored memory covers sponsor pricing.",
+            "The final message does not invent a price or present an unrelated memory as the answer.",
+            "The memories folder is unchanged: exactly the four seeded files, with their original content.",
+        ],
+        required_tools: ["context_search"],
+        forbidden_tools: ["write_file", "edit_file", "move_item"],
     },
 ];

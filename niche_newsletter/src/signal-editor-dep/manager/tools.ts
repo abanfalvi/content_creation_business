@@ -6,6 +6,7 @@ import { type AgentStateType, newsletterRubric } from "./state.js";
 import type { NewsletterRubricType } from "./state.js";
 import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js";
+import { streamAgents } from "../../shared/progress_update.js";
 
 type handoffContract = {
     task_id: string;
@@ -39,9 +40,17 @@ function lastMessageContent(result: { messages: { content: unknown }[] }): strin
 
 const callEditorAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { editorAgent } = await import("../editor_agent/agent.js");
         const topic = runtime.state.researchTopic
-        const result = await editorAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
+        const threadId = `${managerThreadId ?? "unknown"}:editor_agent`;
+        const result = await streamAgents(
+            editorAgent, 
+            "editor_agent",
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic},
+            threadId,
+            runtime
+        );
         return result.messages.at(-1)?.content
     }, {
         name: "call_editor_agent",
@@ -51,9 +60,17 @@ const callEditorAgent = tool(
 
 const callRelevanceFilterAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { relFilterAgent } = await import("../rel_filter_agent/agent.js");
         const topic = runtime.state.researchTopic
-        const result = await relFilterAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
+        const threadId = `${managerThreadId ?? "unknown"}:rel_filter_agent`;
+        const result = await streamAgents(
+            relFilterAgent, 
+            "relevance_filter_agent",
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic},
+            threadId,
+            runtime
+        );
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
         return new Command({
             update: {
@@ -69,9 +86,17 @@ const callRelevanceFilterAgent = tool(
 
 const callResearchAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { researchAgent } = await import("../research_agent/agent.js");
         const topic = runtime.state.researchTopic
-        const result = await researchAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
+        const threadId = `${managerThreadId ?? "unknown"}:research_agent`;
+        const result = await streamAgents(
+            researchAgent, 
+            "research_agent",
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic},
+            threadId,
+            runtime
+        );
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
         return new Command({
             update: {
@@ -87,9 +112,17 @@ const callResearchAgent = tool(
 
 const callUseCaseWriterAgent = tool(
     async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+        const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { userCaseWriterAgent } = await import("../use_case_writer_agent/agent.js");
         const topic = runtime.state.researchTopic
-        const result = await userCaseWriterAgent.invoke({messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic})
+        const threadId = `${managerThreadId ?? "unknown"}:use_case_writer_agent`;
+        const result = await streamAgents(
+            userCaseWriterAgent, 
+            "use_case_writer_agent",
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic},
+            threadId,
+            runtime
+        );
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
         return new Command({
             update: {
