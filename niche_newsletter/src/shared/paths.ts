@@ -11,7 +11,7 @@ export const dataPaths = {
     useCaseScratchPad: () => join(root(), "src/signal-editor-dep/use_case_writer_agent/scratch_pad/"),
     contentStrategy: () => join(root(), "content_strategy/"),
     memories: () => join(root(), "memories/"),
-    checkpointDb: (department: "orchestrator" | "distribution-dep" | "curriculum-dep") =>
+    checkpointDb: (department: "orchestrator" | "distribution-dep" | "curriculum-dep" | "signal-editor-dep") =>
         join(root(), "src", department, ".checkpoints/state.db"),
     sessionsIndex: () => join(root(), "src/orchestrator/.checkpoints/sessions.json"),
 };

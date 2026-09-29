@@ -65,7 +65,7 @@ export function onRetry(error: unknown, request: ToolCallRequest): string | unde
         }
     }
 
-    // HTTP-status-bearing errors from the search/LLM API clients (Tavily, OpenRouter)
+    // HTTP-status-bearing errors from the search/LLM API clients (Parallel, OpenRouter)
     const status = err?.status ?? err?.statusCode;
     if (typeof status === "number") {
         if (status === 429) return `Tool '${toolName}' failed: rate limited, try again later.`;

@@ -4,7 +4,6 @@ import { HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
 import { type AgentStateType, newsletterRubric } from "./state.js";
 import type { NewsletterRubricType } from "./state.js";
-import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js";
 import { streamAgents } from "../../shared/progress_update.js";
 
@@ -71,11 +70,17 @@ const callRelevanceFilterAgent = tool(
             threadId,
             runtime
         );
+        let step;
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
+        if (runtime.state.isNewsRoundup) {
+            step = "editingStep";
+        } else {
+            step = "useCaseStep";
+        }
         return new Command({
             update: {
                 messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
-                currentStep: "useCaseStep"
+                currentStep: step
             }
         });
     }, {
@@ -98,6 +103,7 @@ const callResearchAgent = tool(
             runtime
         );
         if (runtime.state.currentStep === "flexibleWorkflow") return result.messages.at(-1)?.content
+        
         return new Command({
             update: {
                 messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],

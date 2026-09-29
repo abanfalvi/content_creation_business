@@ -22,7 +22,10 @@ const threadId = parseThreadId(process.argv.slice(2));
 const version = readVersion();
 const cwd = process.cwd();
 
-const instance = render(<App threadId={threadId} version={version} cwd={cwd} />, { alternateScreen: true });
+const instance = render(<App threadId={threadId} version={version} cwd={cwd} />, { alternateScreen: true, exitOnCtrlC: false, kittyKeyboard: { mode: "enabled" } });
+
+// Make sure mouse reporting (enabled by App for the scrollbar) never outlives the process.
+process.on("exit", () => process.stdout.write("\x1b[?1002l\x1b[?1006l"));
 
 instance.waitUntilExit()
     .then(() => process.exit(0))

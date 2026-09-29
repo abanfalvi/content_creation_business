@@ -2,7 +2,13 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { ProgressEvent } from "../shared/progress_update.js";
 
 export type ChatRole = "user" | "assistant" | "tool" | "status" | "error";
-export type ChatEntryDraft = { role: ChatRole; text: string; depth?: number; agent?: string };
+// `notice` marks messages from the TUI itself (e.g. "run cancelled"), which stay visible
+// even when agent steps are hidden.
+export type ChatEntryDraft = { role: ChatRole; text: string; depth?: number; agent?: string; notice?: boolean };
+
+// Agent steps: tool calls, status updates, and anything a sub-agent reports.
+export const isAgentStep = (entry: ChatEntryDraft) =>
+    !entry.notice && ((entry.depth ?? 0) > 0 || entry.role === "tool" || entry.role === "status");
 
 const TOOL_ARGS_PREVIEW_LENGTH = 120;
 

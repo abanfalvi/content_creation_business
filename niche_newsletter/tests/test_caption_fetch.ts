@@ -7,7 +7,7 @@ async function getCaption(videoIdOrUrl: string, videoTitle: string) {
         const transcript = await YoutubeTranscript.fetchTranscript(videoIdOrUrl);
         console.log(`Fetched ${transcript.length} segments.`);
     
-        const videoId = videoTitle.toLowerCase().replace(" ", "_");
+        const videoId = videoTitle.toLowerCase().replace(/[^a-z0-9]+/g, "_");
         const outDir = "src/signal-editor-dep/use_case_writer_agent/scratch_pad/";
         const outPath = join(outDir, `${videoId}_transcript.md`);
     

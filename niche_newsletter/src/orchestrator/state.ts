@@ -6,7 +6,8 @@ import { registry } from "@langchain/langgraph/zod";
 export const OrchestratortState = z.object({
   // MessagesZodMeta's optional fields aren't typed for exactOptionalPropertyTypes; cast is a library-typing gap, not a logic issue
   messages: z.array(z.custom<BaseMessage>()).default([]).register(registry, MessagesZodMeta as Parameters<typeof registry.add>[1]),
-  sandboxId: z.string().optional()
+  sandboxId: z.string().optional(),
+  researchTopic: z.string().optional()
 });
 export type AgentStateType = z.infer<typeof OrchestratortState>;
 

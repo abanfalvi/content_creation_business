@@ -44,6 +44,7 @@ src/shared/.auth
 src/distribution-dep/.checkpoints
 src/orchestrator/.checkpoints
 src/curriculum-dep/.checkpoints
+src/signal-editor-dep/.checkpoints
 .beehiiv-*
 pdf_playground/output/
 

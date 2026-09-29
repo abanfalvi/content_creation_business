@@ -6,10 +6,12 @@ import { join } from 'path';
 import { HumanMessage } from "@langchain/core/messages";
 import { opikHandler } from "../../models.js";
 import { RelFilterAgentState } from "./state.js";
-import { tavily } from "@tavily/core";
 import { researchAgent } from "../research_agent/agent.js"
+import { newResearchRunId } from "../research_agent/shared_search_memory.js";
 import { applyFindAndReplace } from "../../shared/file_utils.js";
 import { dataPaths } from "../../shared/paths.js";
+import { extractWebContentTool } from "../../shared/parallel_web.js";
+import matter from "gray-matter";
 
 const yamlString = z.string().refine((val) => {
     try {
@@ -24,8 +26,12 @@ const readResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const researchTopic = runtime.state.researchTopic
         const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`)
-        const findings = await readFile(filePath, "utf-8")
-        return findings;
+        try {
+            const findings = await readFile(filePath, "utf-8");
+            return findings;
+        } catch {
+            return "No research findings for this topic yet"
+        }
     }, {
         name: "read_research_findings",
         description: "Read what the research agent found"
@@ -62,8 +68,8 @@ const addSummaries = tool(
     async ({summary}, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const researchTopic = runtime.state.researchTopic
         const filePath = join(dataPaths.researchScratchPad(), `${researchTopic}_notes.md`)
-        const findings = await readFile(filePath, "utf-8")
-        await writeFile(filePath, summary + findings)
+        const findings = matter(await readFile(filePath, "utf-8"));
+        await writeFile(filePath, matter.stringify(findings.content, yaml.load(summary) as object));
 
     }, {
         name: "add_summaries",
@@ -73,32 +79,6 @@ const addSummaries = tool(
         })
     })
 
-const extractContent = tool(
-    async ({ url }: { url: string[] }) => {
-        const tvly = tavily();
-        const response = await tvly.extract(url);
-
-        const sections = response.results.map(r =>
-            `## ${r.title ?? r.url}\nSource: ${r.url}\n\n${r.rawContent}`
-        );
-
-        if (response.failedResults.length > 0) {
-            sections.push(
-                `## Failed to extract\n` +
-                response.failedResults.map(f => `- ${f.url}: ${f.error}`).join("\n")
-            );
-        }
-
-        return sections.join("\n\n---\n\n");
-    }, {
-        name: "extract_web_content",
-        description: "Check the content of the sources the research agent found",
-        schema: z.object({
-            url: z.array(z.string())
-        })
-    }
-)
-
 const callResearchAgent = tool(
     async ({ instruction }: { instruction: string }, runtime: ToolRuntime<typeof RelFilterAgentState>) => {
         const result = await researchAgent.invoke(
@@ -106,7 +86,7 @@ const callResearchAgent = tool(
                 messages: [new HumanMessage(`${instruction} Current date: ${new Date().toDateString()}`)],
                 researchTopic: runtime.state.researchTopic
             },
-            { callbacks: [opikHandler], recursionLimit: 200 }
+            { callbacks: [opikHandler], recursionLimit: 200, context: { agentId: "parent", researchRunId: newResearchRunId() } }
         );
         return result.messages.at(-1)?.content
     }, {
@@ -118,4 +98,4 @@ const callResearchAgent = tool(
     }
 );
 
-export const filteringTools = [readResearchFindings, editResearchFindings, addSummaries, extractContent, callResearchAgent];
+export const filteringTools = [readResearchFindings, editResearchFindings, addSummaries, extractWebContentTool, callResearchAgent];

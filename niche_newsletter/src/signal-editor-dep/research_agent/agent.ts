@@ -1,8 +1,10 @@
 import { MODELS, opikHandler } from "../../models.js";
 import { ResearchAgentState } from "./state.js";
-import { researchTools, drainFinishedSubAgentTasks, getRunningSubAgentTasks } from "./tools.js";
+import { researchTools, drainFinishedSubAgentTasks, getRunningSubAgentTasks, waitForSubAgentTasks, formatFinishedSubAgentTasks } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
 import { HumanMessage } from "@langchain/core/messages";
+import { sharedSearchStore, researchContextSchema, resolveContext, siblingSearchesMiddleware } from "./shared_search_memory.js";
+import { z } from "zod";
 
 import {
     createAgent,
@@ -20,6 +22,7 @@ import { ChatOpenRouter } from "@langchain/openrouter";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
+import { checkpointer } from "../checkpointer.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -40,22 +43,15 @@ const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/research_agent/SYS
 
 const subAgentNotifyMiddleware = createMiddleware({
   name: "subAgentNotifyMiddleware",
-  beforeModel: async () => {
-    const finished = drainFinishedSubAgentTasks();
+  contextSchema: researchContextSchema,
+  beforeModel: async (_state, runtime) => {
+    const finished = drainFinishedSubAgentTasks(resolveContext(runtime.context).researchRunId);
     if (finished.length === 0) return {};
-
-    const summary = finished
-      .map((t) =>
-        t.status === "completed"
-          ? `Subagent task ${t.taskId} finished:\n${t.result}`
-          : `Subagent task ${t.taskId} failed: ${t.error}`
-      )
-      .join("\n\n---\n\n");
 
     return {
       messages: [
         new HumanMessage({
-          content: `[Background subagent update]\n\n${summary}`,
+          content: `[Background subagent update]\n\n${formatFinishedSubAgentTasks(finished)}`,
           additional_kwargs: { lc_source: "subagent_notification" },
         }),
       ],
@@ -63,29 +59,55 @@ const subAgentNotifyMiddleware = createMiddleware({
   },
 });
 
+// How long the parent waits for its subagents once it has nothing else to do, and how
+// many times it may be sent back to work before it's allowed to finish regardless.
+const SUBAGENT_WAIT_MS = 5 * 60 * 1000;
+const MAX_SUBAGENT_WAIT_ROUNDS = 3;
+
+// When the parent tries to finish while its subagents are still running, wait for them
+// here (instead of bouncing the model straight back, which made it loop "waiting…" as
+// fast as it could answer until the provider errored), then hand it their results once.
 const checkUnfinishedSubAgents = createMiddleware({
   name: "checkUnfinishedSubagentMiddleware",
+  contextSchema: researchContextSchema,
+  stateSchema: z.object({ subAgentWaitRounds: z.number().default(0) }),
 
   afterAgent: {
     canJumpTo: ["model"],
-    hook: async () => {
-      const running = getRunningSubAgentTasks();
-      if (running.length === 0) return undefined;
+    hook: async (state, runtime) => {
+      const { researchRunId } = resolveContext(runtime.context);
+      if (getRunningSubAgentTasks(researchRunId).length === 0 && state.subAgentWaitRounds === 0) {
+        // Nothing outstanding — but results that finished after the last model call
+        // still need to reach the parent before it ends.
+        const finished = drainFinishedSubAgentTasks(researchRunId);
+        if (finished.length === 0) return undefined;
+        return backToModel(state.subAgentWaitRounds, `[Background subagent update]\n\n${formatFinishedSubAgentTasks(finished)}\n\nIncorporate these results before finishing.`);
+      }
+      if (state.subAgentWaitRounds >= MAX_SUBAGENT_WAIT_ROUNDS) return undefined;
 
-      const taskList = running.map((t) => `- ${t.taskId}`).join("\n");
+      const allDone = await waitForSubAgentTasks(researchRunId, SUBAGENT_WAIT_MS);
+      const finished = drainFinishedSubAgentTasks(researchRunId);
+      const stillRunning = getRunningSubAgentTasks(researchRunId);
+      if (finished.length === 0 && stillRunning.length === 0) return undefined;
 
-      return {
-        messages: [
-          new HumanMessage({
-            content: `[Subagent check] You still have ${running.length} spawn_subagent task(s) running and unaccounted for:\n${taskList}\n\nDo not end your turn while these are outstanding. Keep working on something else, or call check_subagent_status on them, before finishing.`,
-            additional_kwargs: { lc_source: "subagent_notification" },
-          }),
-        ],
-        jumpTo: "model",
-      };
+      const parts = [];
+      if (finished.length > 0) parts.push(`[Background subagent update]\n\n${formatFinishedSubAgentTasks(finished)}`);
+      if (!allDone && stillRunning.length > 0) {
+        parts.push(`[Subagent check] ${stillRunning.length} subagent task(s) are still running after waiting ${SUBAGENT_WAIT_MS / 60000} minutes:\n${stillRunning.map((id) => `- ${id}`).join("\n")}\nFinish with what you have if they aren't essential.`);
+      }
+      parts.push("Incorporate these results before finishing.");
+      return backToModel(state.subAgentWaitRounds, parts.join("\n\n"));
     },
   },
-})
+});
+
+function backToModel(rounds: number, content: string) {
+  return {
+    subAgentWaitRounds: rounds + 1,
+    messages: [new HumanMessage({ content, additional_kwargs: { lc_source: "subagent_notification" } })],
+    jumpTo: "model" as const,
+  };
+}
 
 const compressGateMiddleware = createMiddleware({
   name: "compressGateMiddleware",
@@ -140,6 +162,7 @@ export const researchAgent = createAgent({
     tools: researchTools,
     middleware: [
         subAgentNotifyMiddleware,
+        siblingSearchesMiddleware,
         compressGateMiddleware,
         modelCallRetryMiddleware,
         searchRetryMiddleware,
@@ -148,4 +171,7 @@ export const researchAgent = createAgent({
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: ResearchAgentState,
+    contextSchema: researchContextSchema,
+    store: sharedSearchStore,
+    checkpointer: checkpointer
 })

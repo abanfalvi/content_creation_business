@@ -17,6 +17,7 @@ import { ChatOpenRouter } from "@langchain/openrouter";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
+import { checkpointer } from "../checkpointer.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -62,4 +63,5 @@ export const userCaseWriterAgent = createAgent({
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: UseCaseWriterAgentState,
+    checkpointer: checkpointer
 });

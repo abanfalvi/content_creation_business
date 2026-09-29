@@ -31,7 +31,7 @@ async function readConfig(path: string): Promise<string> {
 const editorModel = new ChatOpenRouter({
     model: MODELS.EDITOR_AGENT,
     temperature: .2,
-    maxTokens: 4096,
+    maxTokens: 20000,
     maxRetries: 2
 })
 

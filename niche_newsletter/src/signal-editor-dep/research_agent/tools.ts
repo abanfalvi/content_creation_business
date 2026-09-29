@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { tool, type ClientTool, type ToolRuntime } from "@langchain/core/tools";
+import { tool, type ToolRuntime } from "@langchain/core/tools";
 import { createAgent } from "langchain";
-import { TavilySearch, TavilyExtract } from "@langchain/tavily";
 import { join, basename } from 'path';
 import { randomUUID } from 'node:crypto';
 import { BaseMessage, getBufferString, HumanMessage, RemoveMessage, ToolMessage } from "@langchain/core/messages";
@@ -13,10 +12,13 @@ import { ResearchAgentState, compressRubric } from "./state.js";
 import type { RubricType } from "./state.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile, writeFileEnsuringDir } from "../../shared/file_utils.js";
 import { dataPaths } from "../../shared/paths.js";
+import { runWebSearch, webSearchSchema, extractWebContentTool, WEB_SEARCH_DESCRIPTION, type WebSearchInput } from "../../shared/parallel_web.js";
+import { sharedSearchStore, researchContextSchema, recordSearch, recordAssignment, resolveContext, siblingSearchesMiddleware, type ResearchContext } from "./shared_search_memory.js";
 import matter from "gray-matter";
 import { glob } from "glob";
 
 import dotenv from 'dotenv';
+import { request } from "node:http";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -55,28 +57,15 @@ async function summarizeMessages(messagesToSummarize: BaseMessage[], config?: Ru
 }
 
 const webSearchTool = tool(
-  async ({ query, maxResults, includeDomains }) => {
-    const searchTool = new TavilySearch({
-      maxResults: maxResults,
-      searchDepth: "basic",
-      includeDomains: includeDomains,
-      // ...(includeRawContent ? { includeRawContent } : {}),
-    });
-    // TavilySearch's schema is built on zod/v3, which TS can't cross-check cleanly against this file's zod v4 imports;
-    // the object shape below is correct per TavilySearch's own documented usage.
-    const results = await searchTool.invoke({ query } as unknown as Parameters<typeof searchTool.invoke>[0]);
+  async (input: WebSearchInput, runtime: ToolRuntime<any, ResearchContext>) => {
+    const results = await runWebSearch(input);
+    await recordSearch(runtime.store, runtime.context, input.queries.join(" | "), { results });
     return JSON.stringify(results);
   },
   {
     name: "web_search",
-    description: "Search the web for information relevant to the query.",
-    schema: z.object({
-      query: z.string().describe("the search query"),
-      maxResults: z.number().optional().default(5).describe("max number of results to return"),
-      includeDomains: z.array(z.string()).optional().default([]).describe("List of domains/sites to include in the search results"),
-      // searchDepth: z.enum(["basic", "advanced"]).default("basic").describe("depth of search, advanced costs more, but gives more thorough results"),
-      // includeRawContent: z.enum(["markdown", "text"]).optional().describe("Set this to also get each result's full cleaned page content (not just a short excerpt). Costs more latency and tokens — only ask for it when the default excerpt isn't enough to confirm a finding or write up its practical application.")
-    }),
+    description: WEB_SEARCH_DESCRIPTION,
+    schema: webSearchSchema,
   }
 );
 
@@ -264,7 +253,7 @@ const skimPreviousFindings = tool(
 
 const readPreviousFinding = tool(
   async ({notesTopic, sameTopic}, runtime: ToolRuntime) => {
-    const topic = notesTopic.toLowerCase().replace(" ", "_")
+    const topic = notesTopic.toLowerCase().replace(/[^a-z0-9]+/g, "_")
     const fullPath = join(dataPaths.researchScratchPad(), `${topic}_notes.md`);
     let content: string;
     try {
@@ -280,7 +269,7 @@ const readPreviousFinding = tool(
           messages: [
             new ToolMessage({content: content, tool_call_id: runtime.toolCallId})
           ],
-          researchTopic: topic
+          // researchTopic: topic
         }
       })
     }
@@ -294,31 +283,34 @@ const readPreviousFinding = tool(
   }
 );
 
-const tavilyExtractTool = new TavilyExtract() as ClientTool;
 
 interface SubAgentTask {
+  /** The research run (context.researchRunId) that spawned it — parallel runs share this process. */
+  runId: string;
   status: "running" | "completed" | "failed";
   result?: string;
   error?: string;
-  /** Whether subAgentNotifyMiddleware has already surfaced this task to the parent agent. */
+  /** Whether the parent agent has already been shown this task's result. */
   delivered?: boolean;
+  /** Settles when the subagent finishes either way, so the parent can wait on it. */
+  done: Promise<void>;
 }
 
 // Module-scoped, in-memory only — tasks don't survive a process restart and
-// aren't part of graph state. Fine for a single script run; would need to move
-// into state (or a real Agent Protocol server) to survive across invocations.
+// aren't part of graph state. Every lookup is scoped by research run, so parallel
+// research agents in the same process never see (or wait on) each other's tasks.
 const subAgentTasks = new Map<string, SubAgentTask>();
 
+type FinishedTask = { taskId: string; status: "completed" | "failed"; result?: string; error?: string };
+
 /**
- * Pulls finished (completed/failed) tasks the parent agent hasn't seen yet,
- * marking them delivered so they're only surfaced once. Used by
- * subAgentNotifyMiddleware (agent.ts) to push results into the conversation
- * without the model needing to remember to call check_subagent_status.
+ * Pulls this run's finished (completed/failed) tasks the parent agent hasn't seen yet,
+ * marking them delivered so they're only surfaced once, then forgets them.
  */
-export function drainFinishedSubAgentTasks(): { taskId: string; status: "completed" | "failed"; result?: string; error?: string }[] {
-  const finished: { taskId: string; status: "completed" | "failed"; result?: string; error?: string }[] = [];
+export function drainFinishedSubAgentTasks(runId: string): FinishedTask[] {
+  const finished: FinishedTask[] = [];
   for (const [taskId, task] of subAgentTasks) {
-    if (task.delivered || task.status === "running") continue;
+    if (task.runId !== runId || task.delivered || task.status === "running") continue;
     task.delivered = true;
     finished.push({
       taskId,
@@ -330,20 +322,34 @@ export function drainFinishedSubAgentTasks(): { taskId: string; status: "complet
   return finished;
 }
 
+/** Read-only peek at this run's tasks that are still running. */
+export function getRunningSubAgentTasks(runId: string): string[] {
+  return [...subAgentTasks].filter(([, t]) => t.runId === runId && t.status === "running").map(([id]) => id);
+}
+
 /**
- * Read-only check for tasks still running. Unlike drainFinishedSubAgentTasks,
- * this never touches `delivered` — it's purely a peek, so checkUnfinishedSubAgents
- * (agent.ts) can ask "is anything still outstanding?" without interfering with
- * subAgentNotifyMiddleware's separate ownership of finished-task delivery.
+ * Waits until all of this run's running tasks have finished, or `timeoutMs` passes.
+ * Returns true if everything finished in time.
  */
-export function getRunningSubAgentTasks(): { taskId: string; status: "running" }[] {
-  const running: { taskId: string; status: "running" }[] = [];
-  for (const [taskId, task] of subAgentTasks) {
-    if (task.status === "running") {
-      running.push({ taskId, status: task.status });
-    }
+export async function waitForSubAgentTasks(runId: string, timeoutMs: number): Promise<boolean> {
+  const pending = [...subAgentTasks.values()].filter((t) => t.runId === runId && t.status === "running").map((t) => t.done);
+  if (pending.length === 0) return true;
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); });
+  try {
+    return await Promise.race([Promise.all(pending).then(() => true as const), timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
-  return running;
+}
+
+/** Formats finished tasks as the message the parent agent sees. */
+export function formatFinishedSubAgentTasks(finished: FinishedTask[]): string {
+  return finished
+    .map((t) => t.status === "completed"
+      ? `Subagent task ${t.taskId} finished:\n${t.result}`
+      : `Subagent task ${t.taskId} failed: ${t.error}`)
+    .join("\n\n---\n\n");
 }
 
 const subAgentModel = new ChatOpenRouter({ model: MODELS.RESEARCH_AGENT, temperature: 0.2, maxTokens: 4096, maxRetries: 2 });
@@ -352,28 +358,38 @@ const SUBAGENT_SYSTEM_PROMPT = "You are a focused research subagent. A parent re
 
 const researchSubAgent = createAgent({
   model: subAgentModel,
-  tools: [webSearchTool, tavilyExtractTool],
+  tools: [webSearchTool, extractWebContentTool],
   systemPrompt: SUBAGENT_SYSTEM_PROMPT,
+  middleware: [siblingSearchesMiddleware],
+  contextSchema: researchContextSchema,
+  store: sharedSearchStore,
 });
 
 const spawnSubAgent = tool(
-  async ({ instruction }) => {
+  async ({ instruction }, runtime: ToolRuntime<any, ResearchContext>) => {
     const taskId = randomUUID();
-    subAgentTasks.set(taskId, { status: "running" });
+    const subAgentId = `sub-${taskId.slice(0, 8)}`;
+    const { researchRunId } = resolveContext(runtime.context);
+    // Recorded under the subagent's id so the parent and siblings see the angle as claimed.
+    await recordAssignment(runtime.store, { agentId: subAgentId, researchRunId }, instruction);
 
-    researchSubAgent
+    const task: SubAgentTask = { runId: researchRunId, status: "running", done: Promise.resolve() };
+    subAgentTasks.set(taskId, task);
+    task.done = researchSubAgent
       .invoke(
         { messages: [new HumanMessage(instruction)] },
-        { callbacks: [opikHandler], recursionLimit: 75 },
+        { callbacks: [opikHandler], recursionLimit: 200, context: { agentId: subAgentId, researchRunId } },
       )
       .then((result) => {
         const messages = result.messages as BaseMessage[];
         const last = messages[messages.length - 1];
         const content = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
-        subAgentTasks.set(taskId, { status: "completed", result: content });
+        task.status = "completed";
+        task.result = content;
       })
       .catch((error) => {
-        subAgentTasks.set(taskId, { status: "failed", error: String(error) });
+        task.status = "failed";
+        task.error = String(error);
       });
 
     return `Spawned subagent. Task ID: ${taskId}. It runs in the background — keep working on other angles and check back with check_subagent_status when you're ready for the result, not immediately.`;
@@ -388,9 +404,10 @@ const spawnSubAgent = tool(
 );
 
 const checkSubAgentStatus = tool(
-  async ({ taskId }) => {
+  async ({ taskId }, runtime: ToolRuntime<any, ResearchContext>) => {
     const task = subAgentTasks.get(taskId);
-    if (!task) return `No subagent task found for ID '${taskId}'.`;
+    if (!task || task.runId !== resolveContext(runtime.context).researchRunId) return `No subagent task found for ID '${taskId}'.`;
+    if (task.status !== "running") task.delivered = true;
     if (task.status === "running") return `Task ${taskId} is still running.`;
     if (task.status === "failed") return `Task ${taskId} failed: ${task.error}`;
     return task.result;
@@ -404,4 +421,4 @@ const checkSubAgentStatus = tool(
   }
 );
 
-export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, tavilyExtractTool, skimPreviousFindings, readPreviousFinding, spawnSubAgent, checkSubAgentStatus];
+export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, extractWebContentTool, skimPreviousFindings, readPreviousFinding, spawnSubAgent, checkSubAgentStatus];

@@ -17,6 +17,7 @@ import { ChatOpenRouter } from "@langchain/openrouter";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
+import { checkpointer } from "../checkpointer.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -28,7 +29,7 @@ async function readConfig(path: string): Promise<string> {
 const relFilterModel = new ChatOpenRouter({
     model: MODELS.RELEVANCE_FILTER_AGENT,
     temperature: .2,
-    maxTokens: 4096,
+    maxTokens: 30000,
     maxRetries: 2
 })
 
@@ -56,4 +57,5 @@ export const relFilterAgent = createAgent({
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: RelFilterAgentState,
+    checkpointer: checkpointer
 })

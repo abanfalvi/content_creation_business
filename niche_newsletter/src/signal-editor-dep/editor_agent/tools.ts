@@ -12,7 +12,8 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { ImageGenerationRequestAspectRatio } from "@openrouter/sdk/models";
 import * as QuickChartModule from 'quickchart-js';
 import type { ChartConfiguration } from 'quickchart-js';
-import { Dropbox, DropboxResponseError } from 'dropbox';
+import { DropboxResponseError } from 'dropbox';
+import { getDropbox } from "../../shared/dropbox.js";
 import { EditorAgentState } from "./state.js";
 import { MODELS } from "../../models.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
@@ -23,8 +24,6 @@ import { dataPaths } from "../../shared/paths.js";
 const KEEP_BEEHIIV_TOOLS = new Set([
     "edit_post",
     "edit_post_content",
-    "edit_post_template",
-    "edit_post_template_content",
     "get_post",
     "get_post_content",
     "get_post_footer",
@@ -35,11 +34,9 @@ const KEEP_BEEHIIV_TOOLS = new Set([
     "list_posts",
     "save_post",
     "save_post_footer",
-    "save_post_template",
-    "save_post_template_theme",
     "save_post_theme",
     "duplicate_post",
-    "duplicate_post_template",
+    // Templates are read-only here: editing one would change every future issue built from it.
     "save_split_test",
     // Visuals/assets
     // "generate_image",
@@ -91,6 +88,7 @@ interface QuickChartInstance {
     setWidth(width: number): QuickChartInstance;
     setHeight(height: number): QuickChartInstance;
     setBackgroundColor(color: string): QuickChartInstance;
+    setVersion(version: string): QuickChartInstance;
     getUrl(): string;
     getShortUrl(): Promise<string>;
     toBinary(): Promise<Buffer>;
@@ -138,6 +136,7 @@ const chartConfigSchema = z.object({
 const createChart = tool(
     async ({ config, width, height, backgroundColor }, runtime: ToolRuntime<typeof EditorAgentState>) => {
         const myChart = new QuickChart();
+        myChart.setVersion("4");
         myChart.setConfig(config);
         if (width !== undefined) myChart.setWidth(width);
         if (height !== undefined) myChart.setHeight(height);
@@ -199,10 +198,8 @@ const generateImages = tool(
         if (!openRouterKey) {
             return "OPENROUTER_API_KEY is not set — cannot generate an image.";
         }
-        const dropboxToken = process.env.DROPBOX;
-        if (!dropboxToken) {
-            return "DROPBOX access token is not set — cannot host the generated image.";
-        }
+        const dropbox = getDropbox();
+        if (typeof dropbox === "string") return dropbox;
 
         const openRouter = new OpenRouter({ apiKey: openRouterKey });
 
@@ -238,7 +235,6 @@ const generateImages = tool(
         const researchTopic = runtime.state.researchTopic;
         const dropboxPath = `/newsletter_images/${researchTopic}/${Date.now()}_${randomUUID().slice(0, 8)}.${extension}`;
 
-        const dropbox = new Dropbox({ accessToken: dropboxToken });
 
         let uploadedPath: string;
         try {

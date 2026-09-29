@@ -1,25 +1,37 @@
 import { randomUUID } from "node:crypto";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Text, Static, useApp, useInput, useStdout } from "ink";
-import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Box, Text, measureElement, useApp, useInput, useStdout, type DOMElement } from "ink";
+import { appendFileSync } from "node:fs";
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { orchestratorAgent } from "../orchestrator/orchestrator.js";
 import { checkpointer } from "../orchestrator/checkpointer.js";
 import { opikHandler, MODELS } from "../models.js";
-import { messagesToEntries, progressEventToEntry, type ChatEntryDraft } from "./message_format.js";
+import { isAgentStep, messagesToEntries, progressEventToEntry, type ChatEntryDraft } from "./message_format.js";
 import type { ProgressEvent } from "../shared/progress_update.js";
 import { listSessions, removeSession, touchSession, type Session } from "./sessions.js";
 import { Home } from "./Home.js";
+import { entryToLines } from "./chat_render.js";
 
 type ChatEntry = ChatEntryDraft & { id: string };
+const RESIZE_DEBOUNCE_MS = 60;
 type Command = { name: string; description: string };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
-const RECURSION_LIMIT = 50;
+const RECURSION_LIMIT = 500;
 const PICKER_VISIBLE_ROWS = 8;
-const CLEAR_SCREEN = "\x1b[2J\x1b[3J\x1b[H";
+// Set NL_TUI_DEBUG_INPUT=<file> to log every key/mouse event the TUI receives.
+const DEBUG_INPUT_FILE = process.env.NL_TUI_DEBUG_INPUT;
+const SCROLLBAR_WIDTH = 2;
+const WHEEL_STEP = 3;
+const MOUSE_ON = "\x1b[?1002h\x1b[?1006h";
+const MOUSE_OFF = "\x1b[?1002l\x1b[?1006l";
+const MOUSE_DEFAULT = process.env.NL_TUI_MOUSE ? process.env.NL_TUI_MOUSE === "1" : process.platform !== "win32";
+const TERMINAL_REPLY = /^\x1b?\[\?[\d;]*[a-zA-Z]$/;
+const MOUSE_EVENT =/\[<(\d+);(\d+);(\d+)([Mm])/g;
 const COMMANDS: Command[] = [
     { name: "/sessions", description: "switch to a previous session" },
+    { name: "/mouse", description: "toggle mouse mode (scrollbar dragging vs. text selection)" },
     { name: "/new", description: "start a new session" },
     { name: "/exit", description: "quit" },
 ];
@@ -35,42 +47,68 @@ function Spinner() {
     return <Text color="cyan">{SPINNER_FRAMES[frame]}</Text>;
 }
 
-function roleStyle(role: ChatEntry["role"]): { label: string; color: string; dim: boolean } {
-    switch (role) {
-        case "user": return { label: "you", color: "green", dim: false };
-        case "assistant": return { label: "orchestrator", color: "cyan", dim: false };
-        case "tool": return { label: "tool", color: "gray", dim: true };
-        case "status": return { label: "…", color: "yellow", dim: true };
-        case "error": return { label: "error", color: "red", dim: false };
-    }
-}
-
-function ChatLine({ entry }: { entry: ChatEntry }) {
-    const { label, color, dim } = roleStyle(entry.role);
-    const depth = entry.depth ?? 0;
-    if (depth > 0) {
-        return (
-            <Box marginLeft={(depth - 1) * 2}>
-                <Text dimColor>{"└ "}</Text>
-                <Text color="magenta">{entry.agent} </Text>
-                <Text dimColor={dim}>{entry.text}</Text>
-            </Box>
-        );
-    }
+// `offset` is lines scrolled up from the bottom.
+function Scrollbar({ height, total, offset }: { height: number; total: number; offset: number }) {
+    if (height <= 0) return null;
+    const maxScroll = Math.max(0, total - height);
+    const thumb = maxScroll === 0 ? height : Math.max(1, Math.round((height * height) / total));
+    const thumbTop = maxScroll === 0 ? 0 : Math.round(((maxScroll - offset) / maxScroll) * (height - thumb));
     return (
-        <Box flexDirection="column" marginBottom={1}>
-            <Text color={color} bold>{label}</Text>
-            <Text dimColor={dim}>{entry.text}</Text>
+        <Box flexDirection="column" width={SCROLLBAR_WIDTH} flexShrink={0} paddingLeft={1}>
+            {Array.from({ length: height }, (_, i) => {
+                const inThumb = i >= thumbTop && i < thumbTop + thumb;
+                return <Text key={i} color={inThumb ? "cyan" : "gray"}>{inThumb ? "█" : "│"}</Text>;
+            })}
         </Box>
     );
 }
 
-function InputBox({ value, disabled }: { value: string; disabled: boolean }) {
+function StepsToggle({ shown }: { shown: boolean }) {
+    return (
+        <Box paddingX={1}>
+            <Text color={shown ? "cyan" : "gray"}>{shown ? "▾" : "▸"} agent steps: {shown ? "shown" : "hidden"}</Text>
+            <Text dimColor> · click or ctrl+o to toggle</Text>
+        </Box>
+    );
+}
+
+type Editor = { text: string; cursor: number };
+
+const lineStart = (text: string, pos: number) => text.lastIndexOf("\n", pos - 1) + 1;
+const lineEnd = (text: string, pos: number) => {
+    const end = text.indexOf("\n", pos);
+    return end === -1 ? text.length : end;
+};
+const wordLeft = (text: string, pos: number) => {
+    let i = pos;
+    while (i > 0 && /\s/.test(text[i - 1]!)) i--;
+    while (i > 0 && !/\s/.test(text[i - 1]!)) i--;
+    return i;
+};
+const wordRight = (text: string, pos: number) => {
+    let i = pos;
+    while (i < text.length && /\s/.test(text[i]!)) i++;
+    while (i < text.length && !/\s/.test(text[i]!)) i++;
+    return i;
+};
+
+function InputBox({ editor, disabled }: { editor: Editor; disabled: boolean }) {
+    const { text, cursor } = editor;
+    const atCursor = text[cursor];
+    // The cursor is drawn as an inverted cell over the character it sits on (a space
+    // at the end of the text or before a line break).
+    const cursorCell = atCursor === undefined || atCursor === "\n" ? " " : atCursor;
+    const after = text.slice(atCursor === undefined || atCursor === "\n" ? cursor : cursor + 1);
     return (
         <Box borderStyle="round" borderColor={disabled ? "gray" : "green"} paddingX={1}>
             <Text color="green">{"> "}</Text>
-            <Text wrap="truncate-end">{value}</Text>
-            {!disabled && <Text color="gray">▌</Text>}
+            <Box flexGrow={1} flexShrink={1}>
+                <Text wrap="wrap">
+                    {text.slice(0, cursor)}
+                    {disabled ? cursorCell.trim() : <Text inverse>{cursorCell}</Text>}
+                    {after}
+                </Text>
+            </Box>
         </Box>
     );
 }
@@ -120,17 +158,115 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
     const { exit } = useApp();
     const { stdout } = useStdout();
     const [threadId, setThreadId] = useState(initialThreadId);
-    const [started, setStarted] = useState(false);
     const [entries, setEntries] = useState<ChatEntry[]>([]);
-    const [staticKey, setStaticKey] = useState(0);
+    const [scrollOffset, setScrollOffset] = useState(0);
+    const [size, setSize] = useState({ columns: stdout.columns || 80, rows: stdout.rows || 24 });
+    // Initial guesses until the first layout is measured.
+    const [viewHeight, setViewHeight] = useState(Math.max(1, size.rows - 4));
+    const [homeHeight, setHomeHeight] = useState(0);
+    const [mouseEnabled, setMouseEnabled] = useState(MOUSE_DEFAULT);
+    const [showSteps, setShowSteps] = useState(true);
+    const [inputHeight, setInputHeight] = useState(3);
+    const inputRef = useRef<DOMElement>(null);
+    const chatRef = useRef<DOMElement>(null);
+    const homeRef = useRef<DOMElement>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [statusText, setStatusText] = useState("");
-    const [input, setInput] = useState("");
+    const [editor, setEditor] = useState<Editor>({ text: "", cursor: 0 });
+    const input = editor.text;
+    const setInput = (text: string) => setEditor({ text, cursor: text.length });
+    // Functional updates so bursts of keys (fast typing, key repeat) all apply.
+    const insertText = (s: string) =>
+        setEditor(({ text, cursor }) => ({ text: text.slice(0, cursor) + s + text.slice(cursor), cursor: cursor + s.length }));
+    const moveCursor = (to: (e: Editor) => number) =>
+        setEditor((e) => ({ ...e, cursor: Math.max(0, Math.min(e.text.length, to(e))) }));
     const [menuIndex, setMenuIndex] = useState(0);
     const [picker, setPicker] = useState<{ sessions: Session[]; selected: number } | null>(null);
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
     const seenCountRef = useRef(0);
     const entryIdRef = useRef(0);
+    const abortRef = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        // Dragging a window edge fires a burst of resize events; only apply the last one.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const onResize = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => setSize({ columns: stdout.columns || 80, rows: stdout.rows || 24 }), RESIZE_DEBOUNCE_MS);
+        };
+        stdout.on("resize", onResize);
+        return () => { clearTimeout(timer); stdout.off("resize", onResize); };
+    }, [stdout]);
+
+    // The chat area's height depends on how tall the input/menus below it are, and the
+    // Home banner's height on the terminal width, so measure both after every render.
+    useEffect(() => {
+        if (chatRef.current) {
+            const { height } = measureElement(chatRef.current);
+            if (height > 0 && height !== viewHeight) setViewHeight(height);
+        }
+        if (inputRef.current) {
+            const { height } = measureElement(inputRef.current);
+            if (height > 0 && height !== inputHeight) setInputHeight(height);
+        }
+        if (homeRef.current) {
+            const { height } = measureElement(homeRef.current);
+            if (height > 0 && height !== homeHeight) setHomeHeight(height);
+        }
+    });
+
+    // Mouse reporting (button + drag, SGR encoding) lets the scrollbar be clicked/dragged.
+    // Off by default on Windows: Node's console input there drops mouse events, and while
+    // it's on the terminal stops translating wheel/touchpad scrolling into ↑/↓ — so it
+    // would break scrolling instead of adding to it. Toggle with /mouse.
+    useEffect(() => {
+        if (!mouseEnabled) return;
+        stdout.write(MOUSE_ON);
+        return () => { stdout.write(MOUSE_OFF); };
+    }, [stdout, mouseEnabled]);
+
+    const chatLines = useMemo(
+        () => entries
+            .filter((entry) => showSteps || !isAgentStep(entry))
+            .flatMap((entry) => entryToLines(entry, size.columns - SCROLLBAR_WIDTH)),
+        [entries, size.columns, showSteps],
+    );
+    // The scrollable content is the Home banner (homeHeight rows, rendered as a real
+    // component) followed by the chat lines. `offset` counts rows up from the bottom, so
+    // new messages keep the view pinned to the latest line while the banner scrolls away.
+    const totalRows = homeHeight + chatLines.length;
+    const maxScroll = Math.max(0, totalRows - viewHeight);
+    const offset = Math.min(scrollOffset, maxScroll);
+    const topRow = maxScroll - offset;
+    const showHome = topRow < homeHeight || homeHeight === 0;
+    const firstChatLine = Math.max(0, topRow - homeHeight);
+    const visibleLines = chatLines.slice(firstChatLine, firstChatLine + viewHeight);
+    // Functional update: bursts of wheel/arrow events arrive before a re-render, so each
+    // must build on the previous one rather than on this render's `offset`.
+    const scrollBy = (delta: number) =>
+        // No upper clamp here: maxScroll can change as the view resizes; the render-time
+        // clamp (`offset`) handles overshoot.
+        setScrollOffset((o) => Math.max(0, Math.min(o, maxScroll) + delta));
+
+    // Maps a click/drag on scrollbar row `y` (1-based, chat starts at the top row) to a scroll position.
+    const scrollToRow = (y: number) => {
+        const fraction = viewHeight > 1 ? Math.min(1, Math.max(0, (y - 1) / (viewHeight - 1))) : 1;
+        setScrollOffset(maxScroll - Math.round(fraction * maxScroll));
+    };
+
+    const handleMouse = (data: string) => {
+        for (const [, rawButton, rawX, rawY, kind] of data.matchAll(MOUSE_EVENT)) {
+            const button = Number(rawButton);
+            const x = Number(rawX);
+            const y = Number(rawY);
+            if (button === 64) scrollBy(WHEEL_STEP);
+            else if (button === 65) scrollBy(-WHEEL_STEP);
+            else if (kind === "M" && button === 0 && y === size.rows - inputHeight) setShowSteps((v) => !v);
+            else if (kind === "M" && (button === 0 || button === 32) && x >= size.columns - SCROLLBAR_WIDTH && y <= viewHeight) {
+                scrollToRow(y);
+            }
+        }
+    };
 
     const matchingCommands = input.startsWith("/") && !input.includes(" ")
         ? COMMANDS.filter((c) => c.name.startsWith(input))
@@ -142,20 +278,43 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         setEntries((prev) => [...prev, { ...entry, id: `e${entryIdRef.current}` }]);
     }, []);
 
+    const cancelRun = useCallback(() => {
+        if (!abortRef.current || abortRef.current.signal.aborted) return;
+        setStatusText("cancelling…");
+        abortRef.current.abort();
+    }, []);
+
+    // A run cancelled mid tool call leaves an AI message whose tool_calls have no
+    // ToolMessage answers, which the model API rejects on the next turn — answer them.
+    const closeDanglingToolCalls = useCallback(async (id: string) => {
+        const config = { configurable: { thread_id: id } };
+        const snapshot = await orchestratorAgent.graph.getState(config);
+        const messages = ((snapshot.values as { messages?: BaseMessage[] }).messages ?? []);
+        const answered = new Set(messages.filter(ToolMessage.isInstance).map((m) => m.tool_call_id));
+        const last = [...messages].reverse().find(AIMessage.isInstance);
+        const dangling = (last?.tool_calls ?? []).filter((call) => call.id && !answered.has(call.id));
+        if (dangling.length > 0) {
+            await orchestratorAgent.graph.updateState(config, {
+                messages: dangling.map((call) => new ToolMessage({
+                    tool_call_id: call.id!,
+                    name: call.name,
+                    content: "Cancelled by the user before this tool finished.",
+                })),
+            });
+        }
+        seenCountRef.current = messages.length + dangling.length;
+    }, []);
+
     const quit = useCallback(() => {
         opikHandler.flushAsync().finally(() => exit());
     }, [exit]);
 
-    // <Static> never erases what it already printed, so switching sessions clears the
-    // terminal and remounts it with the new session's history.
     const resetView = useCallback((drafts: ChatEntryDraft[], messageCount: number) => {
-        stdout.write(CLEAR_SCREEN);
         setEntries(drafts.map((d, i) => ({ ...d, id: `e${entryIdRef.current + i + 1}` })));
         entryIdRef.current += drafts.length;
-        setStaticKey((k) => k + 1);
+        setScrollOffset(0);
         seenCountRef.current = messageCount;
-        setStarted(drafts.length > 0);
-    }, [stdout]);
+    }, []);
 
     const startNewSession = useCallback(() => {
         setThreadId(newThreadId());
@@ -183,6 +342,12 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
             case "/quit":
                 quit();
                 return true;
+            case "/mouse":
+                pushEntry({ role: "status", notice: true, text: mouseEnabled
+                    ? "mouse mode off · wheel/touchpad scroll via ↑/↓, text selection works"
+                    : "mouse mode on · scrollbar click/drag and wheel reported by the terminal (if it supports it); shift+drag to select text" });
+                setMouseEnabled(!mouseEnabled);
+                return true;
             case "/new":
                 startNewSession();
                 return true;
@@ -192,22 +357,25 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                 return true;
         }
         return false;
-    }, [quit, startNewSession]);
+    }, [quit, startNewSession, pushEntry, mouseEnabled]);
 
     const handleSubmit = useCallback(async (text: string) => {
         if (runCommand(text)) return;
 
-        setStarted(true);
+        setScrollOffset(0);
         pushEntry({ role: "user", text });
         touchSession(threadId, text);
         seenCountRef.current += 1;
         setIsProcessing(true);
         setStatusText("thinking…");
+        const controller = new AbortController();
+        abortRef.current = controller;
 
         try {
             const stream = await orchestratorAgent.stream(
                 { messages: [new HumanMessage(text)] },
                 {
+                    signal: controller.signal,
                     configurable: { thread_id: threadId },
                     streamMode: ["values", "custom"],
                     recursionLimit: RECURSION_LIMIT,
@@ -233,18 +401,54 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                 }
             }
         } catch (error) {
-            pushEntry({ role: "error", text: error instanceof Error ? error.message : String(error) });
+            if (controller.signal.aborted) {
+                pushEntry({ role: "status", notice: true, text: "■ run cancelled" });
+                await closeDanglingToolCalls(threadId).catch(() => {});
+            } else {
+                pushEntry({ role: "error", text: error instanceof Error ? error.message : String(error) });
+            }
         } finally {
+            abortRef.current = null;
             setIsProcessing(false);
             setStatusText("");
         }
     }, [threadId, pushEntry, runCommand]);
 
     useInput((char, key) => {
+        if (DEBUG_INPUT_FILE) appendFileSync(DEBUG_INPUT_FILE, `${JSON.stringify({ char, key })}\n`);
+
+        // Ctrl+C / Esc cancel a running agent; Ctrl+C when idle quits.
         if (key.ctrl && char === "c") {
-            quit();
+            if (isProcessing) cancelRun();
+            else quit();
             return;
         }
+        if (key.ctrl && char === "o") {
+            setShowSteps((v) => !v);
+            return;
+        }
+        if (key.escape && isProcessing) {
+            cancelRun();
+            return;
+        }
+        // Terminal replies to control queries (e.g. the keyboard-protocol reply "[?0u")
+        // can arrive late and be delivered as typed input; never put them in the box.
+        if (TERMINAL_REPLY.test(char)) return;
+        if (MOUSE_EVENT.test(char)) {
+            MOUSE_EVENT.lastIndex = 0;
+            handleMouse(char);
+            return;
+        }
+        // Plain ↑/↓ scroll the chat unless a menu is using them. Many terminals (e.g. on
+        // Windows) also translate the mouse wheel into ↑/↓ on the alternate screen.
+        const arrowsScroll = !picker && !menuOpen;
+        const page = Math.max(1, viewHeight - 1);
+        if (key.pageUp) { scrollBy(page); return; }
+        if (key.pageDown) { scrollBy(-page); return; }
+        if (key.home && key.ctrl) { scrollBy(maxScroll); return; }
+        if (key.end && key.ctrl) { scrollBy(-maxScroll); return; }
+        if (key.upArrow && (key.shift || arrowsScroll)) { scrollBy(1); return; }
+        if (key.downArrow && (key.shift || arrowsScroll)) { scrollBy(-1); return; }
         if (isProcessing) return;
 
         if (picker) {
@@ -283,6 +487,15 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
             }
         }
 
+        // Newline: shift+enter / alt+enter, ctrl+j (sends a bare "\n"), or a trailing "\" before enter.
+        if ((key.return && (key.shift || key.meta)) || char === "\n") {
+            insertText("\n");
+            return;
+        }
+        if (key.return && input[editor.cursor - 1] === "\\") {
+            setEditor(({ text, cursor }) => ({ text: text.slice(0, cursor - 1) + "\n" + text.slice(cursor), cursor }));
+            return;
+        }
         if (key.return) {
             const trimmed = input.trim();
             if (trimmed.length > 0) {
@@ -291,40 +504,66 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
             }
             return;
         }
-        if (key.backspace || key.delete) {
-            setInput((v) => v.slice(0, -1));
+        if (key.backspace) {
+            setEditor(({ text, cursor }) => cursor === 0 ? { text, cursor }
+                : { text: text.slice(0, cursor - 1) + text.slice(cursor), cursor: cursor - 1 });
             setMenuIndex(0);
             return;
         }
-        if (key.ctrl || key.meta || key.escape || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return;
+        if (key.delete) {
+            setEditor(({ text, cursor }) => ({ text: text.slice(0, cursor) + text.slice(cursor + 1), cursor }));
+            setMenuIndex(0);
+            return;
+        }
+
+        // Cursor movement: ←/→ by character, ctrl/alt+←/→ by word, Home/End (or ctrl+a/e)
+        // to the start/end of the current line.
+        if (key.leftArrow) { moveCursor(({ text, cursor }) => key.ctrl || key.meta ? wordLeft(text, cursor) : cursor - 1); return; }
+        if (key.rightArrow) { moveCursor(({ text, cursor }) => key.ctrl || key.meta ? wordRight(text, cursor) : cursor + 1); return; }
+        if (key.home || (key.ctrl && char === "a")) { moveCursor(({ text, cursor }) => lineStart(text, cursor)); return; }
+        if (key.end || (key.ctrl && char === "e")) { moveCursor(({ text, cursor }) => lineEnd(text, cursor)); return; }
+
+        if (key.ctrl || key.meta || key.escape || key.upArrow || key.downArrow || key.tab) return;
         if (char) {
-            setInput((v) => v + char);
+            // Pasted multi-line text arrives in one chunk with "\r" line breaks.
+            insertText(char.replace(/\r\n?/g, "\n"));
             setMenuIndex(0);
         }
     });
 
     return (
-        <Box flexDirection="column">
-            {started && (
-                <Static key={staticKey} items={entries}>
-                    {(entry) => <ChatLine key={entry.id} entry={entry} />}
-                </Static>
-            )}
-            <Box marginTop={started ? 1 : 0} flexDirection="column">
-                {!started && (
-                    <Home threadId={threadId} model={MODELS.MAIN_ORCHESTRATOR_MODEL} version={version} cwd={cwd} />
-                )}
+        <Box flexDirection="column" height={size.rows}>
+            <Box flexGrow={1} flexShrink={1}>
+                <Box ref={chatRef} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+                    {showHome && (
+                        <Box ref={homeRef} flexDirection="column" flexShrink={0} marginTop={-topRow} paddingBottom={1}>
+                            <Home threadId={threadId} model={MODELS.MAIN_ORCHESTRATOR_MODEL} version={version} cwd={cwd} />
+                        </Box>
+                    )}
+                    {visibleLines.map((line, i) => (
+                        <Box key={i} flexShrink={0}>
+                            <Text wrap="truncate-end">{line || " "}</Text>
+                        </Box>
+                    ))}
+                </Box>
+                <Scrollbar height={viewHeight} total={totalRows} offset={offset} />
+            </Box>
+            <Box flexDirection="column" flexShrink={0}>
                 {isProcessing && (
                     <Box gap={1}>
                         <Spinner />
                         <Text color="yellow">{statusText || "working…"}</Text>
+                        <Text dimColor>· esc to cancel</Text>
                     </Box>
                 )}
                 {picker && (
                     <SessionPicker sessions={picker.sessions} selected={picker.selected} currentId={threadId} pendingDeleteId={pendingDeleteId} />
                 )}
                 {menuOpen && <CommandMenu commands={matchingCommands} selected={Math.min(menuIndex, matchingCommands.length - 1)} />}
-                <InputBox value={input} disabled={isProcessing || picker !== null} />
+                <StepsToggle shown={showSteps} />
+                <Box ref={inputRef} flexDirection="column">
+                    <InputBox editor={editor} disabled={isProcessing || picker !== null} />
+                </Box>
             </Box>
         </Box>
     );

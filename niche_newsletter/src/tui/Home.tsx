@@ -26,6 +26,8 @@ export function Home({ threadId, model, version, cwd }: HomeProps) {
                 <Text bold color="cyan">Commands</Text>
                 <Text dimColor wrap="truncate-end">  Enter    send message</Text>
                 <Text dimColor wrap="truncate-end">  /exit    quit</Text>
+                <Text dimColor wrap="truncate-end">  Ctrl+O   show/hide agent steps</Text>
+                <Text dimColor wrap="truncate-end">  Esc      cancel a running agent</Text>
                 <Text dimColor wrap="truncate-end">  Ctrl+C   quit</Text>
             </Box>
         </Box>

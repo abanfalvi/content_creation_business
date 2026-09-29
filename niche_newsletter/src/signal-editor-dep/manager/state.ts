@@ -7,6 +7,7 @@ export const ManagerAgentState = z.object({
   // MessagesZodMeta's optional fields aren't typed for exactOptionalPropertyTypes; cast is a library-typing gap, not a logic issue
   messages: z.array(z.custom<BaseMessage>()).default([]).register(registry, MessagesZodMeta as Parameters<typeof registry.add>[1]),
   researchTopic: z.string(),
+  isNewsRoundup: z.boolean(),
   currentStep: z.string()
 });
 export type AgentStateType = z.infer<typeof ManagerAgentState>;

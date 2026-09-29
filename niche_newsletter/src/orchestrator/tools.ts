@@ -7,12 +7,12 @@ import { type AgentStateType, smPostRubric } from "./state.js";
 import { getAlphaxivTools } from "./mcp.js";
 import { editorManagerAgent } from "../signal-editor-dep/manager/manager.js";
 import { distributionManagerAgent } from "../distribution-dep/manager/manager.js";
-import Parallel from "parallel-web";
 import { glob } from "glob";
 import { basename, join } from "path";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../shared/file_utils.js";
 import { getBeehiivMCP } from "../shared/beehiiv_mcp.js";
 import { dataPaths } from "../shared/paths.js";
+import { webSearchTool as webSearch, extractWebContentTool as extractWebContent } from "../shared/parallel_web.js";
 import { saveIntoMemories } from "../shared/call_memory_agent.js";
 import { streamAgents } from "../shared/progress_update.js";
 
@@ -20,8 +20,6 @@ function lastMessageContent(result: { messages: { content: unknown }[] }): strin
     const last = result.messages.at(-1);
     return typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
 }
-
-const searchClient = new Parallel({ apiKey: process.env.PARALLEL_SEARCH_API_KEY });
 
 const KEEP_BEEHIIV_TOOLS = new Set([
     "get_automation_stats",
@@ -47,21 +45,42 @@ const handoffContract = z.object({
 });
 type HandoffContract = z.infer<typeof handoffContract>;
 
+const listResearchTopics = tool(
+    async () => {
+        const relFilePath = dataPaths.researchScratchPad();
+        const relFiles = (await glob("**/*.md", { cwd: relFilePath })).map(p => basename(p, "_notes.md"))
+        return relFiles
+
+    }, {
+        name: "list_research_topics",
+        description: "Use this to get the list of research topics that have been executed previously to be able to keep working on it"
+    }
+)
+
 const callEditorManager = tool(
-    async ({instruction, researchTopic, step}, runtime: ToolRuntime<AgentStateType>) => {
+    async ({instruction, researchTopic, step, isNewsRoundup}, runtime: ToolRuntime<AgentStateType>) => {
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:editor_manager`
-        const topic = researchTopic.toLowerCase().replace(" ", "_")
-        const input = {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: step}
+        const topic = researchTopic
+            ? researchTopic.toLowerCase().replace(/[^a-z0-9]+/g, "_")
+            : runtime.state.researchTopic;
+        if (!topic) throw new Error("No active topic, provide researchTopic");
+        const input = {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: "flexibleWorkflow", isNewsRoundup: isNewsRoundup}
         const result = await streamAgents(editorManagerAgent, "editor_manager", input, threadId, runtime);
-        return result.messages.at(-1)?.content
+        return new Command({
+            update: {
+                messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
+                researchTopic: topic,
+            }
+        })
     }, {
         name: "call_editor_manager_agent",
         description: "Call this agent when you want to create a newsletter post, or any other documents",
         schema: z.object({
             instruction: z.string().describe("What the manager should do"),
-            researchTopic: z.string().describe("Keywords of the topic of research"),
-            step: z.enum(["flexibleWorkflow", "researchStep"]).describe("If a complete content creation pipeline needs to run, use researchStep (research agent -> filtering agent -> use case writer -> editor agent). If not all the specialists have to work on the issue, use flexibleWorkflow.")
+            researchTopic: z.string().describe("Keywords of the topic of research that is used for filename. Only pass it when starting a new newsletter issue. Omit it to keep working on the current one"),
+            step: z.enum(["flexibleWorkflow", "researchStep"]).describe("If a complete content creation pipeline needs to run, use researchStep (research agent -> filtering agent -> use case writer -> editor agent). If not all the specialists have to work on the issue, use flexibleWorkflow."),
+            isNewsRoundup: z.boolean().describe("Whether this request or newsletter post is going to be about writing the weekly AI news roundup")
         })
     }
 );
@@ -140,75 +159,75 @@ const sendAnswerToDigProdCreationAgent = tool(
 
 
 
-const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
+// const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
 
-const listContentStrategyThemes = tool(
-    async () => {
-        const files = await glob("*.md", { cwd: dataPaths.contentStrategy() });
-        if (files.length === 0) return "No content strategy themes exist yet.";
+// const listContentStrategyThemes = tool(
+//     async () => {
+//         const files = await glob("*.md", { cwd: dataPaths.contentStrategy() });
+//         if (files.length === 0) return "No content strategy themes exist yet.";
 
-        return Promise.all(files.map(async (file) => {
-            const theme = basename(file, ".md");
-            const content = await readOrInitFile(join(dataPaths.contentStrategy(), file));
-            const preview = content.split("\n").find(line => line.trim().length > 0)?.trim() ?? "";
-            return { theme, preview };
-        }));
-    }, {
-        name: "list_content_strategy_themes",
-        description: "List the existing content strategy themes (one markdown file per theme), each with a one-line preview. Use this to see what strategy docs already exist before reading, editing, or creating one.",
-    }
-);
+//         return Promise.all(files.map(async (file) => {
+//             const theme = basename(file, ".md");
+//             const content = await readOrInitFile(join(dataPaths.contentStrategy(), file));
+//             const preview = content.split("\n").find(line => line.trim().length > 0)?.trim() ?? "";
+//             return { theme, preview };
+//         }));
+//     }, {
+//         name: "list_content_strategy_themes",
+//         description: "List the existing content strategy themes (one markdown file per theme), each with a one-line preview. Use this to see what strategy docs already exist before reading, editing, or creating one.",
+//     }
+// );
 
-const readContentStrategy = tool(
-    async ({ theme }) => {
-        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
-        return await readOrInitFile(path);
-    }, {
-        name: "read_content_strategy",
-        description: "Read the full content strategy document for a theme. If the theme doesn't exist yet, this creates it (empty) rather than erroring — check list_content_strategy_themes first if you're not sure it exists.",
-        schema: z.object({
-            theme: z.string().describe("Theme name, e.g. 'AI productivity tools' — matched to its file by slugifying (lowercased, spaces to underscores)"),
-        }),
-    }
-);
+// const readContentStrategy = tool(
+//     async ({ theme }) => {
+//         const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
+//         return await readOrInitFile(path);
+//     }, {
+//         name: "read_content_strategy",
+//         description: "Read the full content strategy document for a theme. If the theme doesn't exist yet, this creates it (empty) rather than erroring — check list_content_strategy_themes first if you're not sure it exists.",
+//         schema: z.object({
+//             theme: z.string().describe("Theme name, e.g. 'AI productivity tools' — matched to its file by slugifying (lowercased, spaces to underscores)"),
+//         }),
+//     }
+// );
 
-const editContentStrategy = tool(
-    async ({ theme, to_replace, replace_with }) => {
-        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
-        const outcome = await applyFindAndReplace(path, to_replace, replace_with);
+// const editContentStrategy = tool(
+//     async ({ theme, to_replace, replace_with }) => {
+//         const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
+//         const outcome = await applyFindAndReplace(path, to_replace, replace_with);
 
-        if (outcome.status === "not_found") {
-            return `"${to_replace}" not found in the "${theme}" strategy doc (checked exact and whitespace-flexible matches).`;
-        }
-        if (outcome.status === "ambiguous") {
-            return `"${to_replace}" found ${outcome.count} times in the "${theme}" strategy doc — expected exactly one match, aborting edit.`;
-        }
-        return outcome.result;
-    }, {
-        name: "edit_content_strategy",
-        description: "Edit a theme's content strategy document by replacing one exact, unique substring with another. Requires an exact, unique match — if it reports no match or more than one, add more surrounding context and try again. To add brand-new content rather than changing existing text, use add_to_content_strategy instead.",
-        schema: z.object({
-            theme: z.string().describe("Theme this edit applies to"),
-            to_replace: z.string().describe("Exact text to replace"),
-            replace_with: z.string().describe("Text to replace it with"),
-        }),
-    }
-);
+//         if (outcome.status === "not_found") {
+//             return `"${to_replace}" not found in the "${theme}" strategy doc (checked exact and whitespace-flexible matches).`;
+//         }
+//         if (outcome.status === "ambiguous") {
+//             return `"${to_replace}" found ${outcome.count} times in the "${theme}" strategy doc — expected exactly one match, aborting edit.`;
+//         }
+//         return outcome.result;
+//     }, {
+//         name: "edit_content_strategy",
+//         description: "Edit a theme's content strategy document by replacing one exact, unique substring with another. Requires an exact, unique match — if it reports no match or more than one, add more surrounding context and try again. To add brand-new content rather than changing existing text, use add_to_content_strategy instead.",
+//         schema: z.object({
+//             theme: z.string().describe("Theme this edit applies to"),
+//             to_replace: z.string().describe("Exact text to replace"),
+//             replace_with: z.string().describe("Text to replace it with"),
+//         }),
+//     }
+// );
 
-const addToContentStrategy = tool(
-    async ({ theme, content }) => {
-        const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
-        await appendFileEnsuringDir(path, content);
-        return `Added to the "${theme}" strategy doc.`;
-    }, {
-        name: "add_to_content_strategy",
-        description: "Append new content to a theme's content strategy document — creates the theme's file if it doesn't exist yet. Use this for adding new strategy notes; use edit_content_strategy to change something already there.",
-        schema: z.object({
-            theme: z.string().describe("Theme to add content under — a new theme file is created if it doesn't exist yet"),
-            content: z.string().describe("Content to append"),
-        }),
-    }
-);
+// const addToContentStrategy = tool(
+//     async ({ theme, content }) => {
+//         const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
+//         await appendFileEnsuringDir(path, content);
+//         return `Added to the "${theme}" strategy doc.`;
+//     }, {
+//         name: "add_to_content_strategy",
+//         description: "Append new content to a theme's content strategy document — creates the theme's file if it doesn't exist yet. Use this for adding new strategy notes; use edit_content_strategy to change something already there.",
+//         schema: z.object({
+//             theme: z.string().describe("Theme to add content under — a new theme file is created if it doesn't exist yet"),
+//             content: z.string().describe("Content to append"),
+//         }),
+//     }
+// );
 
 const SEARCH_CONTEXT_LINES = 2;
 const SEARCH_MAX_MATCHES = 20;
@@ -246,60 +265,6 @@ const searchContentStrategy = tool(
     }
 );
 
-const webSearch = tool(
-    async ({ queries, objective, mode }) => {
-        const result = await searchClient.search({
-            search_queries: queries,
-            objective: objective ?? null,
-            mode: mode ?? null,
-        });
-        return result.results.map(r => ({
-            url: r.url,
-            title: r.title,
-            publishDate: r.publish_date,
-            excerpts: r.excerpts,
-        }));
-    }, {
-        name: "web_search",
-        description: "Search the web via Parallel. Give 2-3 concise keyword queries (3-6 words each) plus a natural-language objective describing what you're actually trying to find — used together to focus results on what's relevant. Returns ranked results with URL, title, and relevant excerpts (not full page content — use extract_web_content once you've picked a URL worth reading in full).",
-        schema: z.object({
-            queries: z.array(z.string()).min(1).describe("2-3 concise keyword search queries, 3-6 words each"),
-            objective: z.string().optional().describe("Natural-language description of what you're trying to find — used together with queries to focus results on the most relevant content"),
-            mode: z.enum(["turbo", "fast", "basic", "advanced"]).optional().default("fast").describe("turbo: fastest, lower quality. fast (default): high quality within a ~1s budget. basic: low latency, works best with 2-3 high-quality queries. advanced: highest quality, more retrieval/compression, higher latency."),
-        }),
-    }
-);
-
-const extractWebContent = tool(
-    async ({ urls, objective, queries, fullContent }) => {
-        const result = await searchClient.extract({
-            urls,
-            objective: objective ?? null,
-            search_queries: queries ?? null,
-            advanced_settings: fullContent ? { full_content: true } : null,
-        });
-        return {
-            results: result.results.map(r => ({
-                url: r.url,
-                title: r.title,
-                publishDate: r.publish_date,
-                excerpts: r.excerpts,
-                fullContent: r.full_content,
-            })),
-            errors: result.errors,
-        };
-    }, {
-        name: "extract_web_content",
-        description: "Fetch and extract content from up to 20 specific URLs via Parallel — use once web_search (or another source) has surfaced a URL worth reading beyond its search excerpt, or when you already have a URL in hand. An objective/queries pair focuses the extracted excerpts on what's relevant rather than the whole page. Only set fullContent when excerpts genuinely aren't enough — it costs more latency and tokens.",
-        schema: z.object({
-            urls: z.array(z.string()).min(1).max(20).describe("URLs to extract content from (up to 20)"),
-            objective: z.string().optional().describe("Natural-language description of what you're trying to find on these pages"),
-            queries: z.array(z.string()).optional().describe("Optional keyword queries, used together with objective to focus excerpts"),
-            fullContent: z.boolean().optional().describe("Set true to also get each result's full page content (markdown), truncated to a reasonable length — not just the relevant excerpts. Costs more latency and tokens."),
-        }),
-    }
-);
-
 const callMemoryManageAgent = tool(
     async ({whatToSave}, runtime: ToolRuntime<AgentStateType>) => {
         const messages = runtime.state.messages;
@@ -317,17 +282,13 @@ const callMemoryManageAgent = tool(
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
 export const orchestratorTools = [
+    listResearchTopics,
     callEditorManager,
     callDistributionManager,
     calDigProdCreationAgent,
     sendAnswerToDigProdCreationAgent,
     webSearch,
     extractWebContent,
-    listContentStrategyThemes,
-    readContentStrategy,
-    editContentStrategy,
-    addToContentStrategy,
-    searchContentStrategy,
     callMemoryManageAgent,
     ...beehiivTools
 ];

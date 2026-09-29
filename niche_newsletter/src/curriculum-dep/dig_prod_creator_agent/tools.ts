@@ -5,7 +5,8 @@ import type { DigProdCreationAgentState } from "./state.js";
 import { OpenRouter } from "@openrouter/sdk";
 import { MODELS } from "../../models.js";
 import { type ImageGenerationRequestAspectRatio } from "@openrouter/sdk/models";
-import { Dropbox, DropboxResponseError } from "dropbox";
+import { type Dropbox, DropboxResponseError } from "dropbox";
+import { getDropbox } from "../../shared/dropbox.js";
 import { Command, INTERRUPT, isInterrupted } from "@langchain/langgraph";
 import { Sandbox, CommandExitError } from "e2b";
 import dotenv from 'dotenv';
@@ -49,8 +50,7 @@ function toDirectDropboxUrl(shareUrl: string): string {
 
 // Shared by generate_image and create_document — both just need "these bytes, hosted at
 // a public URL" and don't care about the Dropbox-specific mechanics to get there.
-async function uploadToDropboxAndGetShareUrl(dropboxToken: string, path: string, contents: Buffer): Promise<string> {
-    const dropbox = new Dropbox({ accessToken: dropboxToken });
+async function uploadToDropboxAndGetShareUrl(dropbox: Dropbox, path: string, contents: Buffer): Promise<string> {
 
     let uploadedPath: string;
     try {
@@ -97,10 +97,8 @@ const createDocument = tool(
         if (!e2bApiKey) {
             return "E2B_API_KEY is not set — cannot run the document-generation sandbox.";
         }
-        const dropboxToken = process.env.DROPBOX;
-        if (!dropboxToken) {
-            return "DROPBOX access token is not set — cannot host the generated document.";
-        }
+        const dropbox = getDropbox();
+        if (typeof dropbox === "string") return dropbox;
 
         const existingSandboxId = runtime.state.sandboxId;
         let sandbox: Sandbox | undefined;
@@ -167,7 +165,7 @@ const createDocument = tool(
             const dropboxPath = `/newsletter_images/digital_products/${name}.pdf`;
             let documentUrl: string;
             try {
-                documentUrl = await uploadToDropboxAndGetShareUrl(dropboxToken, dropboxPath, Buffer.from(pdfBytes));
+                documentUrl = await uploadToDropboxAndGetShareUrl(dropbox, dropboxPath, Buffer.from(pdfBytes));
             } catch (error) {
                 return error instanceof Error ? error.message : `Failed to host the generated document: ${error}`;
             }
@@ -258,10 +256,8 @@ const genImage = tool(
         if (!openRouterKey) {
             return "OPENROUTER_API_KEY is not set — cannot generate an image.";
         }
-        const dropboxToken = process.env.DROPBOX;
-        if (!dropboxToken) {
-            return "DROPBOX access token is not set — cannot host the generated image.";
-        }
+        const dropbox = getDropbox();
+        if (typeof dropbox === "string") return dropbox;
 
         const openRouter = new OpenRouter({ apiKey: openRouterKey });
 
@@ -295,7 +291,7 @@ const genImage = tool(
 
         let shareUrl: string;
         try {
-            shareUrl = await uploadToDropboxAndGetShareUrl(dropboxToken, dropboxPath, imageBytes);
+            shareUrl = await uploadToDropboxAndGetShareUrl(dropbox, dropboxPath, imageBytes);
         } catch (error) {
             return error instanceof Error ? error.message : `Failed to host the generated image: ${error}`;
         }

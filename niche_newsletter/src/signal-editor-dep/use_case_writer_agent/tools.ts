@@ -42,7 +42,7 @@ const getVideoTranscript = tool(
             const transcript = await YoutubeTranscript.fetchTranscript(videoIdOrUrl);
             console.log(`Fetched ${transcript.length} segments.`);
         
-            const videoId = videoTitle.toLowerCase().replace(" ", "_");
+            const videoId = videoTitle.toLowerCase().replace(/[^a-z0-9]+/g, "_");
             const outDir = dataPaths.useCaseScratchPad();
             const outPath = join(outDir, `${videoId}_transcript.md`);
         

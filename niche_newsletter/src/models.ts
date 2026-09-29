@@ -1,5 +1,9 @@
 // List of model names to use throughout the project
 import { OpikCallbackHandler } from "opik-langchain";
+import { installOpenRouterErrorCapture } from "./shared/openrouter_errors.js";
+
+// Every agent imports this module, so this covers all ChatOpenRouter calls.
+installOpenRouterErrorCapture();
 
 export const opikHandler = new OpikCallbackHandler({projectName: "niche_newsletter"});
 export const MODELS = {
@@ -17,7 +21,12 @@ export const MODELS = {
     DIG_PROD_CREATOR_MODEL: "openai/gpt-6-luna",
 
     MEMORY_MANAGEMENT_MODEL: "qwen/qwen3.7-flash",
+    OVERLAP_JUDGE_MODEL: "typesafe/jev-1.13",
 
-    MAIN_ORCHESTRATOR_MODEL: "dots-studio/dots-3-note-preview:free"
+    MAIN_ORCHESTRATOR_MODEL: "deepseek/deepseek-v4-flash-0731",
+
+    ORCHESTRATOR_FALLBACK_1: "stealth/space-bunny-alpha",
+    ORCHESTRATOR_FALLBACK_2: "qwen/qwen3.7-flash",
+
 } as const;
 

@@ -20,6 +20,7 @@ import dotenv from 'dotenv';
 import { MODELS } from "../../models.js";
 import { ManagerAgentState, type AgentStateType } from "./state.js";
 import { managerTools } from "./tools.js";
+import { checkpointer } from "../checkpointer.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -31,7 +32,7 @@ async function readConfig(path: string): Promise<string> {
 const editorManagerModel = new ChatOpenRouter({
     model: MODELS.SIGNAL_EDITOR_MANAGER,
     temperature: .2,
-    maxTokens: 2048,
+    maxTokens: 8192,
     maxRetries: 2
 })
 
@@ -57,14 +58,16 @@ const STEP_CONFIG = {
     tools: managerTools.filter(t => t.name === "call_research_agent")
   },
   filteringStep: {
-    tools: managerTools.filter(t => t.name === "call_rel_filter_agent")
+    tools: managerTools.filter(t => t.name === "call_rel_filter_agent" || t.name === "call_research_agent")
   },
   useCaseStep: {
-    tools: managerTools.filter(t => t.name === "call_use_case_writer_agent")
+    tools: managerTools.filter(t => t.name === "call_use_case_writer_agent" || t.name === "call_rel_filter_agent")
   },
   editingStep: {
     tools: managerTools.filter(t =>
       t.name === "call_editor_agent" ||
+      t.name === "call_rel_filter_agent" ||
+      t.name === "call_use_case_writer_agent" ||
       t.name === "review_newsletter" ||
       t.name === "get_post" ||
       t.name === "get_post_content" ||
@@ -99,4 +102,5 @@ export const editorManagerAgent = createAgent({
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: ManagerAgentState,
+    checkpointer: checkpointer
 });
