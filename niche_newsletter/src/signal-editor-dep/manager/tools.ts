@@ -149,7 +149,7 @@ const callUseCaseWriterAgent = tool(
 const reviewNewsletter = tool(
     async (rubric: NewsletterRubricType) => {
         const total = rubric.structure + rubric.visualRelevance + rubric.groundedness;
-        const passed = rubric.formatCorrect && total >= PASSING_SCORE;
+        const passed = rubric.formatCorrect && total >= PASSING_SCORE && rubric.contentSpanish;
 
         if (passed) {
             return `Approved — score ${total}/6, format correct. Ready for human review in Notion.`;

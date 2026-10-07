@@ -30,7 +30,9 @@ const contextSearch = tool(
                 const { data } = matter.read(path.join(relFilePath, p));
                 relFiles[p.split(path.sep).join("/")] = data;
             } catch (error) {
-                return `Reading the yaml part of the file returned an error: ${error}.\n Concerned file: ${p}`
+                return relFiles[p.split(path.sep).join("/")] = {
+                    error: `Reading the yaml part of the file returned an error: ${error}.\n Concerned file: ${p}`,
+                };
             }
         }
 

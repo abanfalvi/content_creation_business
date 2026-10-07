@@ -136,14 +136,21 @@ const retrieveMemoryMiddleware = createMiddleware({
     if (!lastHuman) return { relevantMemory: "" };
     const files = await glob("**/*.md", { cwd: dataPaths.memories() });
     if (files.length == 0) return { relevantMemory: "" }
-    const memories = await Promise.all(files.map(async (file) => {
-        const { data, content } = matter(await readFile(join(dataPaths.memories(), file), "utf-8"));
-        return { 
-          name: String(data.name ?? basename(file)),
-          description: String(data.description ?? ""),
-          content
-         };
-    }));
+    const memories = (await Promise.all(files.map(async (file) => {
+      try {
+          const { data, content } = matter(await readFile(join(dataPaths.memories(), file), "utf-8"));
+          return { 
+            name: String(data.name ?? basename(file)),
+            description: String(data.description ?? ""),
+            content
+          };
+      } catch (error) {
+        console.warn(`[relevant memory snippet selector] skipped ${file}: ${String(error)}`);
+        return undefined;
+     }
+    }))).filter((m): m is NonNullable<typeof m> => m !== undefined);
+    if (memories.length === 0) return { relevantMemory: "" };
+
     const MEMORY_CHOICES = {
       memoryChoice: {
         type: "choice",

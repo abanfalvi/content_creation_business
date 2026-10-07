@@ -560,7 +560,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
             if (key.tab || key.return) {
                 const name = matchingCommands[selected]!.name;
                 setMenuIndex(0);
-                if (name == "/queue" || name == "/steer") {setInput(name); return;}
+                if (name == "/queue" || name == "/steer") { setInput(name + " "); return; }
                 if (isProcessing && name !== "/mouse") {
                     pushEntry({ role: "status", notice: true, text: `${name} is unavailable while the agent is working · esc to cancel first` });
                     setInput("");

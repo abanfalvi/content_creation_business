@@ -40,6 +40,13 @@ export function createVerifyEndRunMiddleware() {
         if (nudges >= MAX_NUDGES) return {};
 
         const lastMessage = state.messages.at(-1)?.content;
+        const returnMessage =
+            "Your last message seems unfinished. Verify you completed the tasks you were given. If yes, confirm it in your response or raise any issue you had, else keep working on it.";
+            
+        if (!lastMessage) return {
+            messages: [new HumanMessage({ content: returnMessage, additional_kwargs: { lc_source: LC_SOURCE } })],
+            jumpTo: "model" as const,
+          };
         try {
           const response = await decisionsClient.alpha.decisions.create({
             decisionsRequest: {
@@ -52,8 +59,6 @@ export function createVerifyEndRunMiddleware() {
           const score = answer?.type === "noul" ? answer.noul : undefined;
           if (score === undefined || score > FINISHED_THRESHOLD) return {};
 
-          const returnMessage =
-            "Your last message seems unfinished. Verify you completed the tasks you were given. If yes, confirm it in your response or raise any issue you had, else keep working on it.";
           return {
             messages: [new HumanMessage({ content: returnMessage, additional_kwargs: { lc_source: LC_SOURCE } })],
             jumpTo: "model" as const,

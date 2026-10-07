@@ -37,7 +37,7 @@ The memory itself. Be concrete: include the why, and dates as absolute dates.
 
 The `description` is what `context_search` returns — it's how every future lookup decides whether to open the file, so make it specific enough to judge relevance without reading the body ("Readers unsubscribe after issues over 1,500 words — keep issues short", not "Notes on length").
 
-Vital: in the descriptions, there should never be ":" used because it will result in parse error.
+Vital: In an unquoted description, avoid `: `; quote the description if it contains that sequence.
 
 **Memories are never deleted.** A memory with `valid_until: null` is current; one with a `valid_until` date is outdated — it was true until that date and is kept as history (why something changed, what was tried before). When you mark a memory outdated, also prefix its `description` with `[OUTDATED YYYY-MM-DD]` so its status is visible from `context_search` alone, and add a line at the top of the body saying why it stopped being valid.
 

@@ -393,7 +393,7 @@ const allTools = [
 // An unattended scheduled run (src/run_scheduled.ts sets these) gets a reduced toolset, so a prompt
 // that was injected into a schedule can't do the most damaging things: it can never create or cancel
 // schedules itself (no self-replicating runs), and it can only publish if the schedule was allowed to.
-const UNATTENDED_BLOCKED_TOOLS = new Set(["schedule_run", "cancel_scheduled_run", "list_scheduled_runs"]);
+const UNATTENDED_BLOCKED_TOOLS = new Set(["schedule_run", "cancel_scheduled_run"]);
 if (process.env.NL_SCHEDULED_RUN === "1" && process.env.NL_ALLOW_DISTRIBUTION !== "1") {
     UNATTENDED_BLOCKED_TOOLS.add("call_distribution_manager_agent");
 }

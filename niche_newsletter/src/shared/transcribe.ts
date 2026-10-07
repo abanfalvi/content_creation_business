@@ -85,7 +85,7 @@ async function resolveVideoId(platform: Platform, url: string): Promise<string> 
         ? url.match(/\/(?:reels?|p|tv)\/([\w-]+)/)
         : url.match(/\/video\/(\d+)/);
     if (match?.[1]) return match[1];
-    const { stdout } = await run("yt-dlp", ["--no-playlist", ...cookieArgs(), "--print", "id", url]);
+    const { stdout } = await run("yt-dlp", ["--no-playlist", ...cookieArgs(), "--print", "id", url], { timeout: 30_000 });
     return stdout.trim();
 }
 
@@ -98,7 +98,7 @@ async function downloadAudio(url: string, dir: string): Promise<string> {
         "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
         "-o", join(dir, "%(id)s.%(ext)s"),
         url,
-    ]);
+    ], { timeout: 5 * 60_000 });
     const file = (await readdir(dir)).find((f) => f.endsWith(".wav"));
     if (!file) throw new Error("yt-dlp produced no audio file");
     return join(dir, file);

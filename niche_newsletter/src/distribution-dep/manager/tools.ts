@@ -343,8 +343,6 @@ const findInstagramReels = tool(
                 .describe("Search terms to discover Instagram reels by"),
             hashtags: z.array(z.string()).optional().default([])
                 .describe("Hashtags to discover Instagram reels by"),
-            maxResults: z.number().int().min(1).max(200).optional().default(30)
-                .describe("Maximum number of reels to fetch"),
         }),
     }
 );
