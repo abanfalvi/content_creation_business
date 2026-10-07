@@ -204,11 +204,11 @@ export async function createDataRoot(): Promise<string> {
     return root;
 }
 
-// Runs before every case so each starts from empty scratch pads, strategy docs and memories.
+// Runs before every case so each starts from empty scratch pads, management notes and memories.
 // Checkpoint databases are left alone: they stay open for the whole process, and each
 // case uses its own thread_id anyway.
 export async function resetDataDirs(): Promise<void> {
-    for (const dir of [dataPaths.researchScratchPad(), dataPaths.useCaseScratchPad(), dataPaths.contentStrategy(), dataPaths.memories()]) {
+    for (const dir of [dataPaths.researchScratchPad(), dataPaths.useCaseScratchPad(), dataPaths.contentStrategy(), dataPaths.contentPlans(), dataPaths.memories()]) {
         await rm(dir, { recursive: true, force: true });
         await mkdir(dir, { recursive: true });
     }

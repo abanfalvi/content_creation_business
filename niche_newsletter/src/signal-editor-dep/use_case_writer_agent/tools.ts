@@ -10,6 +10,8 @@ import { join } from 'path';
 import { UseCaseWriterAgentState } from "./state.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
 import { dataPaths } from "../../shared/paths.js";
+import { webSearchTool, extractWebContentTool } from "../../shared/parallel_web.js";
+
 
 const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
 
@@ -227,4 +229,4 @@ const addContent = tool(
     }
 );
 
-export const useCaseWriterTools = [readResearchFindings, readHowTo, editHowTo, addContent, getVideoTranscript, searchVideos, getVideoData];
+export const useCaseWriterTools = [readResearchFindings, readHowTo, editHowTo, addContent, getVideoTranscript, searchVideos, getVideoData, webSearchTool, extractWebContentTool];

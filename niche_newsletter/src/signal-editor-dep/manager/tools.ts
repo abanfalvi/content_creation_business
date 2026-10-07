@@ -2,9 +2,10 @@
 import { tool, type ToolRuntime } from "@langchain/core/tools";
 import { HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
-import { type AgentStateType, newsletterRubric } from "./state.js";
+import { type AgentStateType, ManagerAgentContext, newsletterRubric } from "./state.js";
 import type { NewsletterRubricType } from "./state.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js";
+import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { streamAgents } from "../../shared/progress_update.js";
 
 type handoffContract = {
@@ -16,11 +17,13 @@ type handoffContract = {
 
 const PASSING_SCORE = 5;
 
+// Drafts live in Notion, so the manager reads them there (read-only) rather than from beehiiv.
+const KEEP_NOTION_TOOLS = new Set([
+    "notion-search",
+    "notion-fetch",
+])
+
 const KEEP_BEEHIIV_TOOLS = new Set([
-    "get_post",
-    "get_post_content",
-    "get_post_footer",
-    "list_posts",
     // Referral program management — creating/editing milestones, rewards, and program
     // settings. Reading how the program is performing is the orchestrator's job, not
     // this agent's; it only needs get_referral_program as a prerequisite read before
@@ -38,7 +41,7 @@ function lastMessageContent(result: { messages: { content: unknown }[] }): strin
 }
 
 const callEditorAgent = tool(
-    async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType>) => {
+    async (instruction: handoffContract, runtime: ToolRuntime<AgentStateType, typeof ManagerAgentContext>) => {
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { editorAgent } = await import("../editor_agent/agent.js");
         const topic = runtime.state.researchTopic
@@ -48,7 +51,8 @@ const callEditorAgent = tool(
             "editor_agent",
             {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic},
             threadId,
-            runtime
+            runtime,
+            {promptingGuide: runtime.context?.promptingGuide ?? ""}
         );
         return result.messages.at(-1)?.content
     }, {
@@ -148,7 +152,7 @@ const reviewNewsletter = tool(
         const passed = rubric.formatCorrect && total >= PASSING_SCORE;
 
         if (passed) {
-            return `Approved — score ${total}/6, format correct. Ready for human review and publish in beehiiv.`;
+            return `Approved — score ${total}/6, format correct. Ready for human review in Notion.`;
         }
 
         const issues: string[] = [];
@@ -156,15 +160,17 @@ const reviewNewsletter = tool(
         if (rubric.structure < 2) issues.push(`Structure (${rubric.structure}/2): ${rubric.structureEvidence}`);
         if (rubric.visualRelevance < 2) issues.push(`Visuals (${rubric.visualRelevance}/2): ${rubric.visualRelevanceEvidence}`);
         if (rubric.groundedness < 2) issues.push(`Groundedness (${rubric.groundedness}/2): ${rubric.groundednessEvidence}`);
+        if (!rubric.contentSpanish) issues.push("Content needs to be translated to Spanish first!");
 
         return `Needs revision — score ${total}/6. Turn these into a concrete instruction for call_editor_agent, don't just resend the topic:\n${issues.join("\n")}`;
     }, {
         name: "review_newsletter",
-        description: "Score the current newsletter draft against the quality rubric — structure, visual relevance, and groundedness, each 0-2, plus a pass/fail on whether it was actually saved in the real beehiiv format. Call this after reading the draft back (e.g. via the editor agent's report or a direct read), with your own honest scoring and evidence for each criterion. A disqualifying format failure or a total under 5/6 means it needs revision — use the returned issues to write a specific instruction for call_editor_agent rather than approving a draft that isn't ready.",
+        description: "Score the current newsletter draft against the quality rubric — structure, visual relevance, and groundedness, each 0-2, plus a pass/fail on whether the Notion page was actually saved with clean, correctly formatted content. Call this after reading the draft back (e.g. via the editor agent's report or a direct read), with your own honest scoring and evidence for each criterion. A disqualifying format failure or a total under 5/6 means it needs revision — use the returned issues to write a specific instruction for call_editor_agent rather than approving a draft that isn't ready.",
         schema: newsletterRubric,
     }
 );
 
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
+const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
 
-export const managerTools = [callEditorAgent, callRelevanceFilterAgent, callUseCaseWriterAgent, callResearchAgent, reviewNewsletter, ...beehiivTools];
+export const managerTools = [callEditorAgent, callRelevanceFilterAgent, callUseCaseWriterAgent, callResearchAgent, reviewNewsletter, ...notionTools, ...beehiivTools];

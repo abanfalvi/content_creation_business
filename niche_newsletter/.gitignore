@@ -33,7 +33,7 @@ coverage/
 
 # Project outline
 assets/PROJECT.md
-content_strategy/
+management_notes/
 assets/RESEARCH_REPORT.md
 src/signal-editor-dep/research_agent/scratch_pad
 src/signal-editor-dep/use_case_writer_agent/scratch_pad
@@ -49,3 +49,5 @@ src/signal-editor-dep/.checkpoints
 pdf_playground/output/
 
 memories/
+transcripts/
+assets/INK_CRASHCOURSE.md

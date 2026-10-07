@@ -12,7 +12,14 @@ export const ManagerAgentState = z.object({
 });
 export type AgentStateType = z.infer<typeof ManagerAgentState>;
 
+// Per-run, not checkpointed: the orchestrator passes it on every call, so an outline can't leak into a later post.
+export const ManagerAgentContext = z.object({
+  promptingGuide: z.string().default("").describe("Agreed outline for the current post on a prompting technique; empty for any other post")
+});
+export type ManagerContextType = z.infer<typeof ManagerAgentContext>;
+
 export const newsletterRubric = z.object({
+    contentSpanish: z.boolean().describe("Whether the content is in Spanish"),
     structure: z.number().min(0).max(2).describe("0: a wall of undifferentiated text, or no clear headline/section breakdown. 1: has sections, but they don't clearly mirror the research findings and use cases the editor was given. 2: a clear headline and a section structure that mirrors the supplied findings/use cases, with every section earning its place"),
     structureEvidence: z.string().describe("Quote the headline and list the section headers found, or point to where the structure is missing/unclear"),
 
@@ -22,7 +29,7 @@ export const newsletterRubric = z.object({
     groundedness: z.number().min(0).max(2).describe("0: contains at least one claim not traceable to the supplied research findings/use cases. 1: mostly grounded, but something reads as invented or embellished beyond the source material. 2: every claim in the draft is traceable back to the research/use-case material the editor was given"),
     groundednessEvidence: z.string().describe("Quote any claim that isn't traceable to the source material, or confirm none were found"),
 
-    formatCorrect: z.boolean().describe("Whether the draft was actually saved in beehiiv using the documented post format/metadata (per learn_post_authoring/learn_post_metadata), not a guessed format. False is disqualifying on its own, regardless of the other scores, since a malformed draft won't render for the human reviewer"),
+    formatCorrect: z.boolean().describe("Whether the draft was actually saved as a Notion page with clean content (headings, paragraphs, lists, working image blocks) that follows the newsletter layout, not a guessed or broken format. False is disqualifying on its own, regardless of the other scores, since a malformed draft won't read or copy cleanly for the human reviewer"),
     formatCorrectEvidence: z.string().describe("Quote the specific format/metadata problem found, or confirm the saved post matches the documented format"),
 });
 export type NewsletterRubricType = z.infer<typeof newsletterRubric>;

@@ -11,6 +11,8 @@ import type { ProgressEvent } from "../shared/progress_update.js";
 import { listSessions, removeSession, touchSession, type Session } from "./sessions.js";
 import { Home } from "./Home.js";
 import { entryToLines } from "./chat_render.js";
+import { getTotalCost, onCostChange } from "../shared/cost_tracker.js";
+import { countContextTokens, fetchContextWindow } from "./context_usage.js";
 
 type ChatEntry = ChatEntryDraft & { id: string };
 const RESIZE_DEBOUNCE_MS = 60;
@@ -33,6 +35,8 @@ const COMMANDS: Command[] = [
     { name: "/sessions", description: "switch to a previous session" },
     { name: "/mouse", description: "toggle mouse mode (scrollbar dragging vs. text selection)" },
     { name: "/new", description: "start a new session" },
+    { name: "/queue", description: "queue another message for the agent" },
+    { name: "/steer", description: "steer the agent into another direction" },
     { name: "/exit", description: "quit" },
 ];
 
@@ -68,6 +72,28 @@ function StepsToggle({ shown }: { shown: boolean }) {
         <Box paddingX={1}>
             <Text color={shown ? "cyan" : "gray"}>{shown ? "▾" : "▸"} agent steps: {shown ? "shown" : "hidden"}</Text>
             <Text dimColor> · click or ctrl+o to toggle</Text>
+        </Box>
+    );
+}
+
+const BAR_WIDTH = 20;
+const formatTokens = (n: number) => {
+    if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(2)}M`;
+    return n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : String(n);
+};
+
+const formatCost = (usd: number) => `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
+
+function ContextBar({ used, max, cost }: { used: number; max: number; cost: number }) {
+    const fraction = Math.min(1, used / max);
+    const filled = Math.round(fraction * BAR_WIDTH);
+    const color = fraction >= 0.9 ? "red" : fraction >= 0.7 ? "yellow" : "green";
+    return (
+        <Box paddingX={1} gap={1}>
+            <Text dimColor>context {formatTokens(used)}/{formatTokens(max)} →</Text>
+            <Text color={color}>{"█".repeat(filled)}<Text color="gray">{"░".repeat(BAR_WIDTH - filled)}</Text></Text>
+            <Text color={color}>{(fraction * 100).toFixed(1)}%</Text>
+            <Text dimColor>· spent {formatCost(cost)}</Text>
         </Box>
     );
 }
@@ -183,9 +209,26 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
     const [menuIndex, setMenuIndex] = useState(0);
     const [picker, setPicker] = useState<{ sessions: Session[]; selected: number } | null>(null);
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+    // Steering messages typed while a run is going. A ref, not state: the stream loop in
+    // handleSubmit is a long-lived closure that has to see messages typed after it started.
+    const steerRef = useRef<string[]>([]);
     const seenCountRef = useRef(0);
     const entryIdRef = useRef(0);
     const abortRef = useRef<AbortController | null>(null);
+    const [queue, setQueue] = useState<string[]>([]);
+    const [contextTokens, setContextTokens] = useState(0);
+    const [contextWindow, setContextWindow] = useState(200_000);
+    const [totalCost, setTotalCost] = useState(getTotalCost());
+
+    useEffect(() => onCostChange(setTotalCost), []);
+
+    useEffect(() => {
+        void fetchContextWindow(MODELS.MAIN_ORCHESTRATOR_MODEL).then(setContextWindow);
+        // Resumed sessions start with their existing context.
+        void orchestratorAgent.graph.getState({ configurable: { thread_id: initialThreadId } })
+            .then((s) => setContextTokens(countContextTokens((s.values as { messages?: BaseMessage[] }).messages ?? [])))
+            .catch(() => {});
+    }, [initialThreadId]);
 
     useEffect(() => {
         // Dragging a window edge fires a burst of resize events; only apply the last one.
@@ -319,6 +362,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
     const startNewSession = useCallback(() => {
         setThreadId(newThreadId());
         resetView([], 0);
+        setContextTokens(0);
     }, [resetView]);
 
     const openSession = useCallback(async (id: string) => {
@@ -326,6 +370,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         const messages = ((snapshot.values as { messages?: BaseMessage[] }).messages ?? []);
         setThreadId(id);
         resetView(messagesToEntries(messages), messages.length);
+        setContextTokens(countContextTokens(messages));
     }, [resetView]);
 
     const deleteSession = useCallback(async (id: string) => {
@@ -370,6 +415,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         setStatusText("thinking…");
         const controller = new AbortController();
         abortRef.current = controller;
+        let steered = false;
 
         try {
             const stream = await orchestratorAgent.stream(
@@ -391,28 +437,60 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                     continue;
                 }
                 const messages = (data.messages ?? []) as BaseMessage[];
-                if (messages.length <= seenCountRef.current) continue;
-                const newMessages = messages.slice(seenCountRef.current);
-                seenCountRef.current = messages.length;
+                setContextTokens(countContextTokens(messages));
+                if (messages.length > seenCountRef.current) {
+                    const newMessages = messages.slice(seenCountRef.current);
+                    seenCountRef.current = messages.length;
 
-                for (const entry of messagesToEntries(newMessages)) {
-                    pushEntry(entry);
-                    if (entry.role === "status") setStatusText(entry.text);
+                    for (const entry of messagesToEntries(newMessages)) {
+                        pushEntry(entry);
+                        if (entry.role === "status") setStatusText(entry.text);
+                    }
+                }
+
+                // Safe steering point: the tools step has finished and been checkpointed, so every
+                // tool call is answered and nothing in flight is lost. Stop here and redirect.
+                if (steerRef.current.length > 0 && ToolMessage.isInstance(messages.at(-1))) {
+                    steered = true;
+                    setStatusText("steering…");
+                    controller.abort();
+                    break;
                 }
             }
         } catch (error) {
-            if (controller.signal.aborted) {
+            if (steered) {
+                // The abort we triggered ourselves to steer — not a user cancel or an error.
+            } else if (controller.signal.aborted) {
+                setQueue([]);
+                steerRef.current = [];
                 pushEntry({ role: "status", notice: true, text: "■ run cancelled" });
                 await closeDanglingToolCalls(threadId).catch(() => {});
             } else {
+                steerRef.current = [];
                 pushEntry({ role: "error", text: error instanceof Error ? error.message : String(error) });
             }
         } finally {
+            if (steered) {
+                pushEntry({ role: "status", notice: true, text: "↪ steering after the last tool call" });
+                await closeDanglingToolCalls(threadId).catch(() => {});
+            }
             abortRef.current = null;
             setIsProcessing(false);
             setStatusText("");
         }
+
+        // Deliver steering text: after a steered stop, or typed too late to catch a tool
+        // boundary (the run finished first). Cancels and errors cleared it above.
+        const steerText = steerRef.current.splice(0).join("\n\n");
+        if (steerText) void handleSubmit(steerText);
     }, [threadId, pushEntry, runCommand]);
+
+    useEffect(() => {
+        if (isProcessing || queue.length == 0) return;
+        const next = queue.join("\n\n");
+        setQueue([]);
+        void handleSubmit(next);
+    }, [isProcessing, queue, handleSubmit]);
 
     useInput((char, key) => {
         if (DEBUG_INPUT_FILE) appendFileSync(DEBUG_INPUT_FILE, `${JSON.stringify({ char, key })}\n`);
@@ -449,7 +527,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         if (key.end && key.ctrl) { scrollBy(-maxScroll); return; }
         if (key.upArrow && (key.shift || arrowsScroll)) { scrollBy(1); return; }
         if (key.downArrow && (key.shift || arrowsScroll)) { scrollBy(-1); return; }
-        if (isProcessing) return;
+        if (isProcessing && picker) return;
 
         if (picker) {
             const current = picker.sessions[picker.selected];
@@ -480,9 +558,16 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
             if (key.downArrow) { setMenuIndex(Math.min(matchingCommands.length - 1, selected + 1)); return; }
             if (key.escape) { setInput(""); return; }
             if (key.tab || key.return) {
-                setInput("");
+                const name = matchingCommands[selected]!.name;
                 setMenuIndex(0);
-                runCommand(matchingCommands[selected]!.name);
+                if (name == "/queue" || name == "/steer") {setInput(name); return;}
+                if (isProcessing && name !== "/mouse") {
+                    pushEntry({ role: "status", notice: true, text: `${name} is unavailable while the agent is working · esc to cancel first` });
+                    setInput("");
+                    return;
+                }
+                setInput("");
+                runCommand(name);
                 return;
             }
         }
@@ -498,6 +583,28 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         }
         if (key.return) {
             const trimmed = input.trim();
+            if (trimmed.startsWith("/queue")) {
+                const message = trimmed.slice("/queue".length).trim();
+                if (message) setQueue((q) => [...q, message]);
+                else pushEntry({role: "status", notice: true, text: "usage /queue <message>"});
+                setInput("");
+                return;
+            }
+            else if (trimmed.startsWith("/steer")) {
+                const message = trimmed.slice("/steer".length).trim();
+                if (!message) pushEntry({role: "status", notice: true, text: "usage /steer <message>"});
+                else if (isProcessing) {
+                    steerRef.current.push(message);
+                    pushEntry({role: "status", notice: true, text: `↪ will steer after the next tool call: ${message}`});
+                }
+                else void handleSubmit(message);
+                setInput("");
+                return;
+            }
+            if (isProcessing) {
+                pushEntry({role: "status", notice: true, text: "agent is busy - use /queue <message> to run it after the agent finished. Or use /steer <message> to steer after the next tool call"});
+                return;
+            }
             if (trimmed.length > 0) {
                 setInput("");
                 void handleSubmit(trimmed);
@@ -556,13 +663,17 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                         <Text dimColor>· esc to cancel</Text>
                     </Box>
                 )}
+                {queue.map((msg, i) => (
+                    <Text key={i} color="cyanBright" wrap="truncate-end">⏳ {msg}</Text>
+                ))}
                 {picker && (
                     <SessionPicker sessions={picker.sessions} selected={picker.selected} currentId={threadId} pendingDeleteId={pendingDeleteId} />
                 )}
                 {menuOpen && <CommandMenu commands={matchingCommands} selected={Math.min(menuIndex, matchingCommands.length - 1)} />}
                 <StepsToggle shown={showSteps} />
                 <Box ref={inputRef} flexDirection="column">
-                    <InputBox editor={editor} disabled={isProcessing || picker !== null} />
+                    <InputBox editor={editor} disabled={picker !== null} />
+                    <ContextBar used={contextTokens} max={contextWindow} cost={totalCost} />
                 </Box>
             </Box>
         </Box>

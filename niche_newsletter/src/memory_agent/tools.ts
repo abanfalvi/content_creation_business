@@ -26,8 +26,12 @@ const contextSearch = tool(
         const relFilePath = resolveMemoryPath(filePath);
         const relFiles: Record<string, Record<string, unknown>> = {};
         for await (const p of glob("**/*.md", {cwd: relFilePath})) {
-            const { data } = matter.read(path.join(relFilePath, p));
-            relFiles[p.split(path.sep).join("/")] = data;
+            try {
+                const { data } = matter.read(path.join(relFilePath, p));
+                relFiles[p.split(path.sep).join("/")] = data;
+            } catch (error) {
+                return `Reading the yaml part of the file returned an error: ${error}.\n Concerned file: ${p}`
+            }
         }
 
         return relFiles;

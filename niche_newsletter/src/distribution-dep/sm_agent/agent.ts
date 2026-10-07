@@ -2,6 +2,7 @@ import { MODELS } from "../../models.js";
 import { SMAgentState, type AgentStateType } from "./state.js";
 import { SMTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
     createAgent,
@@ -108,6 +109,7 @@ export const SMAgent = createAgent({
         toolErrorMiddleware({onError: onRetry}),
         bufferUserPiiGuard,
         reviewGateMiddleware,
+        createVerifyEndRunMiddleware(),
         // toolsConfig
     ],
     systemPrompt: SYSTEM_PROMPT,

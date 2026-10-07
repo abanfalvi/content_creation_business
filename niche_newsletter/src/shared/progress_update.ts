@@ -5,14 +5,15 @@ export type ProgressEvent =
   | { type: "tool_call";   agent: string; path: string[]; name: string; args: unknown }
   | { type: "agent_end";   agent: string; path: string[] };
 
-export async function streamAgents<A extends ReactAgent<any>>(agent: A, name: string, input: Parameters<A["stream"]>[0], threadId: string, runtime: ToolRuntime) {
+export async function streamAgents<A extends ReactAgent<any>>(agent: A, name: string, input: Parameters<A["stream"]>[0], threadId: string, runtime: ToolRuntime, agentContext: Record<string, unknown> = {}) {
     const path = [name];
     runtime.writer?.({ type: "agent_start", agent: name, path });
 
     let final: Awaited<ReturnType<A["invoke"]>> | undefined;
     for await (const [mode, chunk] of await agent.stream(input, {
         streamMode: ["updates", "values", "custom"],
-        configurable: { thread_id: threadId }
+        configurable: { thread_id: threadId },
+        context: agentContext
     })) {
         if (mode === "custom") { 
             const event = chunk as ProgressEvent;

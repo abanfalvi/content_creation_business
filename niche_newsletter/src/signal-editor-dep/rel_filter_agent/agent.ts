@@ -2,6 +2,7 @@ import { MODELS } from "../../models.js";
 import { RelFilterAgentState } from "./state.js";
 import { filteringTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
     createAgent,
@@ -53,7 +54,8 @@ export const relFilterAgent = createAgent({
     tools: filteringTools,
     middleware: [
         modelCallRetryMiddleware,
-        toolErrorMiddleware({onError: onRetry})
+        toolErrorMiddleware({onError: onRetry}),
+        createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: RelFilterAgentState,

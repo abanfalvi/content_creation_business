@@ -21,34 +21,33 @@ import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js"
 import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { dataPaths } from "../../shared/paths.js";
 
+// Write tools are hidden for now, due to tier gate
 const KEEP_BEEHIIV_TOOLS = new Set([
-    "edit_post",
-    "edit_post_content",
+    // "edit_post",
+    // "edit_post_content",
     "get_post",
     "get_post_content",
     "get_post_footer",
     "get_post_template_content",
-    "learn_post_authoring",
-    "learn_post_metadata",
+    // "learn_post_authoring",
+    // "learn_post_metadata",
     "list_post_templates",
     "list_posts",
-    "save_post",
-    "save_post_footer",
-    "save_post_theme",
-    "duplicate_post",
-    // Templates are read-only here: editing one would change every future issue built from it.
-    "save_split_test",
-    // Visuals/assets
-    // "generate_image",
+    // "save_post",
+    // "save_post_footer",
+    // "save_post_theme",
+    // "duplicate_post",
+    // "save_split_test",
+    
     "get_asset",
-    // "get_image_generation_status",
     "list_assets",
-    "save_file",
-    "save_image",
-    "update_asset",
-    // Metadata
+    // "save_file",
+    // "save_image",
+    // "update_asset",
+    
     "list_content_tags",
-    "save_content_tag",
+    // "save_content_tag",
+
     // Self-service API discovery
     "read_documentation",
     "search_documentation",
@@ -64,7 +63,7 @@ const KEEP_NOTION_TOOLS = new Set([
     "notion-list-private-pages",
     "notion-list-recent-pages",
     "notion-list-favorite-pages",
-    "notion-create-database",
+    // "notion-create-database",
     "notion-update-data-source",
     "notion-create-view",
     "notion-update-view",
@@ -280,7 +279,7 @@ const generateImages = tool(
         });
     }, {
         name: "generate_image",
-        description: "Generate an image from a text prompt via OpenRouter's image API and host it on Dropbox. Returns { imageUrl, prompt } where imageUrl is a public, directly-embeddable link ready to drop into a beehiiv image block or an <img> tag.",
+        description: "Generate an image from a text prompt via OpenRouter's image API and host it on Dropbox. Returns { imageUrl, prompt } where imageUrl is a public, directly-embeddable link ready to drop into notion or beehiiv.",
         schema: z.object({
             prompt: z.string().describe("Detailed description of the image to generate"),
             aspectRatio: z.string().optional().default("16:9").describe("Aspect ratio, e.g. '16:9', '1:1', '4:3'"),
@@ -288,7 +287,7 @@ const generateImages = tool(
     }
 );
 
-const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS);
+const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS, { envVars: ["NOTION_DRAFT_PAGE"] });
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
-export const editorTools = [getResearchFindings, generateImages, createChart, ...notionTools, ...beehiivTools];
+export const editorTools = [getResearchFindings, generateImages, createChart, ...beehiivTools, ...notionTools];

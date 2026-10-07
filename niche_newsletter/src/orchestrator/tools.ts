@@ -8,13 +8,16 @@ import { getAlphaxivTools } from "./mcp.js";
 import { editorManagerAgent } from "../signal-editor-dep/manager/manager.js";
 import { distributionManagerAgent } from "../distribution-dep/manager/manager.js";
 import { glob } from "glob";
-import { basename, join } from "path";
+import { basename, extname, join, resolve, sep } from "path";
+import { readFile } from "fs/promises";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../shared/file_utils.js";
 import { getBeehiivMCP } from "../shared/beehiiv_mcp.js";
 import { dataPaths } from "../shared/paths.js";
 import { webSearchTool as webSearch, extractWebContentTool as extractWebContent } from "../shared/parallel_web.js";
 import { saveIntoMemories } from "../shared/call_memory_agent.js";
 import { streamAgents } from "../shared/progress_update.js";
+import { isEvalMode, sideEffectLog } from "../shared/eval_guard.js";
+import { addScheduledRun, cancelScheduledRun, listScheduledRuns, sanitizePrompt, type ScheduledRun } from "../shared/scheduled_runs.js";
 
 function lastMessageContent(result: { messages: { content: unknown }[] }): string {
     const last = result.messages.at(-1);
@@ -34,7 +37,9 @@ const KEEP_BEEHIIV_TOOLS = new Set([
     "get_referral_program",
     "list_recommendations",
 
-    "list_publications"
+    "list_publications",
+    "list_posts",
+    "get_post"
 ])
 
 const handoffContract = z.object({
@@ -57,16 +62,40 @@ const listResearchTopics = tool(
     }
 )
 
+const GUIDE_MAX_CHARS = 30_000;
+
+// The orchestrator's file tools use virtual paths rooted at the management notes folder ("/post_outlines/x.md"),
+// so resolve against that folder, never outside it, and never create a missing file (a typo'd path must fail loudly).
+async function readPromptingGuide(guidePath: string | undefined): Promise<string> {
+    if (!guidePath?.trim()) return "";
+    const root = resolve(dataPaths.managementNotes());
+    const full = resolve(root, guidePath.trim().replace(/^[\\/]+/, ""));
+    if (!full.startsWith(root + sep) || extname(full) !== ".md") {
+        throw new Error(`promptingGuide must be a .md file inside the management notes folder (e.g. /post_outlines/<topic>.md), got "${guidePath}".`);
+    }
+    let text: string;
+    try {
+        text = await readFile(full, "utf-8");
+    } catch {
+        throw new Error(`No outline file at "${guidePath}". Write the outline with write_file first, then pass its path.`);
+    }
+    if (!text.trim()) throw new Error(`The outline file "${guidePath}" is empty.`);
+    if (text.length > GUIDE_MAX_CHARS) throw new Error(`The outline file "${guidePath}" is ${text.length} characters; the limit is ${GUIDE_MAX_CHARS}.`);
+    return text;
+}
+
 const callEditorManager = tool(
-    async ({instruction, researchTopic, step, isNewsRoundup}, runtime: ToolRuntime<AgentStateType>) => {
+    async ({instruction, researchTopic, step, isNewsRoundup, promptingGuide}, runtime: ToolRuntime<AgentStateType>) => {
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
         const threadId = `${currentThreadId}:editor_manager`
         const topic = researchTopic
             ? researchTopic.toLowerCase().replace(/[^a-z0-9]+/g, "_")
             : runtime.state.researchTopic;
         if (!topic) throw new Error("No active topic, provide researchTopic");
+        // Passed as run context on every call (not checkpointed state): an omitted path means no outline, so one never leaks into a different post.
+        const promptingContent = await readPromptingGuide(promptingGuide);
         const input = {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: "flexibleWorkflow", isNewsRoundup: isNewsRoundup}
-        const result = await streamAgents(editorManagerAgent, "editor_manager", input, threadId, runtime);
+        const result = await streamAgents(editorManagerAgent, "editor_manager", input, threadId, runtime, {promptingGuide: promptingContent});
         return new Command({
             update: {
                 messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
@@ -80,7 +109,8 @@ const callEditorManager = tool(
             instruction: z.string().describe("What the manager should do"),
             researchTopic: z.string().describe("Keywords of the topic of research that is used for filename. Only pass it when starting a new newsletter issue. Omit it to keep working on the current one"),
             step: z.enum(["flexibleWorkflow", "researchStep"]).describe("If a complete content creation pipeline needs to run, use researchStep (research agent -> filtering agent -> use case writer -> editor agent). If not all the specialists have to work on the issue, use flexibleWorkflow."),
-            isNewsRoundup: z.boolean().describe("Whether this request or newsletter post is going to be about writing the weekly AI news roundup")
+            isNewsRoundup: z.boolean().describe("Whether this request or newsletter post is going to be about writing the weekly AI news roundup"),
+            promptingGuide: z.string().optional().describe("Path of the markdown file holding the agreed detailed outline for a post on a prompting technique, as you wrote it with write_file (e.g. /post_outlines/few_shot_examples.md). The file's content is delivered to the editor agent directly, so don't paste the outline into the instruction. Pass it on every call about that post, including revisions; omit it for any other post")
         })
     }
 );
@@ -99,7 +129,7 @@ const callDistributionManager = tool(
         return result.messages.at(-1)?.content
     }, {
         name: "call_distribution_manager_agent",
-        description: "Call this agent when you the newsletter post should be published on social media or new leads should be found/contacted.",
+        description: "Call this agent when you the newsletter post should be published on social media or new leads (large Instagram accounts in the newsletter's niche) should be found and logged in Notion, or when you need to know what is currently trending or popular on TikTok and Instagram reels in the niche (it searches by keyword/hashtag and can transcribe the top videos; read-only research). It never contacts anyone.",
         schema: z.object({
             instruction: z.string().describe("What the manager should do")
         })
@@ -278,10 +308,74 @@ const callMemoryManageAgent = tool(
     }
 );
 
+const describeRun = (r: ScheduledRun) =>
+    ({ id: r.id, runAt: new Date(r.runAt).toString(), repeat: r.repeat, allowDistribution: r.allowDistribution ?? false, prompt: r.prompt });
+
+const scheduleRun = tool(
+    async ({ prompt: rawPrompt, runAt, delayMinutes, repeat, allowDistribution }) => {
+        let prompt: string;
+        try {
+            prompt = sanitizePrompt(rawPrompt);
+        } catch (error) {
+            return error instanceof Error ? error.message : String(error);
+        }
+        const now = new Date();
+        if ((runAt === undefined) === (delayMinutes === undefined)) {
+            return "Pass exactly one of runAt or delayMinutes.";
+        }
+        const when = runAt !== undefined ? new Date(runAt) : new Date(now.getTime() + delayMinutes! * 60_000);
+        if (Number.isNaN(when.getTime())) return `Could not parse runAt "${runAt}". Use ISO 8601, e.g. 2026-10-07T09:00.`;
+        if (when <= now) return `That time is in the past. The current time is ${now.toString()}.`;
+        if (isEvalMode()) {
+            sideEffectLog.push({ server: "task_scheduler", tool: "schedule_run", args: { prompt, runAt: when.toISOString(), repeat }, at: now.toISOString() });
+            return { scheduled: { id: "eval-mock-run", runAt: when.toString(), repeat: repeat ?? "once", prompt } };
+        }
+        let run: ScheduledRun;
+        try {
+            run = addScheduledRun(prompt, when, repeat ?? "once", allowDistribution ?? false);
+        } catch (error) {
+            return error instanceof Error ? error.message : String(error);
+        }
+        return { scheduled: describeRun(run), note: "Created as a Windows Task Scheduler task. It runs headlessly in its own session (visible in the TUI's /sessions) when the time comes, and a run missed while the PC was off starts when it's back on and the user is logged in." };
+    }, {
+        name: "schedule_run",
+        description: "Schedule a prompt to be run by you (the orchestrator) later, once or on a daily/weekly repeat. This creates a Windows Task Scheduler task that starts a headless run in a fresh session, with nobody watching and nobody able to answer questions or approve anything, so write the prompt as a complete, self-contained instruction. Only schedule a publish or outreach if the user already agreed to that concrete plan.",
+        schema: z.object({
+            prompt: z.string().describe("Self-contained instruction to run, including every detail you would need (topic, angle, constraints) since you won't have this conversation's context in mind"),
+            runAt: z.string().optional().describe("When to run, ISO 8601 (e.g. 2026-10-07T09:00 — local time if no offset is given). Use instead of delayMinutes"),
+            delayMinutes: z.number().optional().describe("Run this many minutes from now. Use instead of runAt"),
+            repeat: z.enum(["once", "daily", "weekly"]).optional().describe("Repeat after the first run. Defaults to once"),
+            allowDistribution: z.boolean().optional().describe("Let the unattended run call the distribution manager (publishing, outreach). Defaults to false: set true only when the user explicitly approved that concrete publish plan for this schedule"),
+        }),
+    }
+);
+
+const listScheduledRunsTool = tool(
+    async () => ({ now: new Date().toString(), scheduled: listScheduledRuns().map(describeRun) }),
+    {
+        name: "list_scheduled_runs",
+        description: "List the runs currently scheduled, soonest first, plus the current date and time (use it to work out runAt for schedule_run).",
+    }
+);
+
+const cancelScheduledRunTool = tool(
+    async ({ id }) => {
+        if (isEvalMode()) {
+            sideEffectLog.push({ server: "task_scheduler", tool: "cancel_scheduled_run", args: { id }, at: new Date().toISOString() });
+            return `Cancelled scheduled run ${id}.`;
+        }
+        return cancelScheduledRun(id) ? `Cancelled scheduled run ${id}.` : `No scheduled run with id ${id}.`;
+    }, {
+        name: "cancel_scheduled_run",
+        description: "Cancel a scheduled run and delete its Windows scheduled task (all future repeats too). Get the id from list_scheduled_runs.",
+        schema: z.object({ id: z.string().describe("Id of the scheduled run") }),
+    }
+);
+
 // const alphaxivTools = await getAlphaxivTools();
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
-export const orchestratorTools = [
+const allTools = [
     listResearchTopics,
     callEditorManager,
     callDistributionManager,
@@ -290,5 +384,20 @@ export const orchestratorTools = [
     webSearch,
     extractWebContent,
     callMemoryManageAgent,
+    scheduleRun,
+    listScheduledRunsTool,
+    cancelScheduledRunTool,
     ...beehiivTools
 ];
+
+// An unattended scheduled run (src/run_scheduled.ts sets these) gets a reduced toolset, so a prompt
+// that was injected into a schedule can't do the most damaging things: it can never create or cancel
+// schedules itself (no self-replicating runs), and it can only publish if the schedule was allowed to.
+const UNATTENDED_BLOCKED_TOOLS = new Set(["schedule_run", "cancel_scheduled_run", "list_scheduled_runs"]);
+if (process.env.NL_SCHEDULED_RUN === "1" && process.env.NL_ALLOW_DISTRIBUTION !== "1") {
+    UNATTENDED_BLOCKED_TOOLS.add("call_distribution_manager_agent");
+}
+
+export const orchestratorTools = process.env.NL_SCHEDULED_RUN === "1"
+    ? allTools.filter((t) => !UNATTENDED_BLOCKED_TOOLS.has(t.name))
+    : allTools;

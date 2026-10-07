@@ -396,7 +396,7 @@ const spawnSubAgent = tool(
   },
   {
     name: "spawn_subagent",
-    description: "Delegate a specific, self-contained research question to an isolated subagent that investigates it independently using web search, without adding its search noise to your own context. Runs in the background and returns a task ID immediately, not the result. Launch several in one turn (multiple tool calls) to investigate independent angles in parallel. Only the subagent's final write-up comes back to you, never its intermediate searches.",
+    description: "Delegate a specific, self-contained research question to an isolated subagent that investigates it independently using web search, without adding its search noise to your own context. Runs in the background and returns a task ID immediately, not the result. Launch several in one turn (multiple tool calls) to investigate independent angles in parallel. Only the subagent's final write-up comes back to you, never its intermediate searches. Use it to research on different topics, than what you are doing. Keep in mind the subagents will only have web search tools.",
     schema: z.object({
       instruction: z.string().describe("A specific, self-contained research question or task. The subagent sees only this instruction and nothing else about your conversation, so include everything it needs to know."),
     }),

@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { trackResponseCost } from "./cost_tracker.js";
 
 // OpenRouter sometimes answers HTTP 200 with an error body instead of a completion (the
 // upstream provider failed after the request was accepted):
@@ -52,6 +53,7 @@ export function installOpenRouterErrorCapture() {
         const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         const isCompletion = url.includes("openrouter.ai") && url.includes("/chat/completions");
         const isJson = response.headers.get("content-type")?.includes("application/json");
+        if (isCompletion && response.ok) void trackResponseCost(response.clone(), !!isJson);
         if (!isCompletion || !response.ok || !isJson) return response;
 
         // Read a clone so the caller can still consume the original body.

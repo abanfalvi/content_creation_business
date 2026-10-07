@@ -2,6 +2,7 @@ import { MODELS } from "../../models.js";
 import { DigProdCreationAgentState, type AgentStateType } from "./state.js";
 import { KEEP_CANVA_TOOLS, productCreationTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
     createAgent,
@@ -101,7 +102,8 @@ export const DigProdCreationAgent = createAgent({
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
         reviewGateMiddleware,
-        toolsConfig
+        toolsConfig,
+        createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: DigProdCreationAgentState,

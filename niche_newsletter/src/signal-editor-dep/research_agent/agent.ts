@@ -2,6 +2,7 @@ import { MODELS, opikHandler } from "../../models.js";
 import { ResearchAgentState } from "./state.js";
 import { researchTools, drainFinishedSubAgentTasks, getRunningSubAgentTasks, waitForSubAgentTasks, formatFinishedSubAgentTasks } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 import { HumanMessage } from "@langchain/core/messages";
 import { sharedSearchStore, researchContextSchema, resolveContext, siblingSearchesMiddleware } from "./shared_search_memory.js";
 import { z } from "zod";
@@ -167,7 +168,8 @@ export const researchAgent = createAgent({
         modelCallRetryMiddleware,
         searchRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
-        checkUnfinishedSubAgents
+        checkUnfinishedSubAgents,
+        // createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: ResearchAgentState,

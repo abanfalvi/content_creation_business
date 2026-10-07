@@ -1,4 +1,5 @@
 import { onRetry } from "../../shared/on_error.js";
+import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
     createAgent,
@@ -57,6 +58,7 @@ export const distributionManagerAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: ManagerAgentState,

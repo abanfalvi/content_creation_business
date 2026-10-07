@@ -15,3 +15,8 @@ export const EditorAgentState = z.object({
   imageUrl: z.string().optional(),
 });
 export type AgentStateType = z.infer<typeof EditorAgentState>;
+
+
+export const EditorAgentContext = z.object({
+  promptingGuide: z.string().default("").describe("Detailed outline of what the next post on prompting techniques should be about")
+})

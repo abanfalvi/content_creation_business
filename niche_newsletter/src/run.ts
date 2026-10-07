@@ -19,19 +19,19 @@ const promptSchema = z.object({
     negative_prompt: z.string().describe("Prompt what to avoid when generating the image"),
 });
 
-const instruction = "Write an image generation prompt for generating the logo for my newsletter business, be specific on how the logo should look like. I want a logo (no need for text in the picture, only some shapes) that truly represents a newsletter business can be used for branding: it shares content on AI news/latest developments and on techniques to help people upskill themselves in AI. \n Return your answer in the provided schema.";
+const instruction = "Try to create an example post on a Notion page like you would do it on beehiiv with an image, does not matter the content. I just want to see how the content written there is compatible with what beehiiv expects.";
 
 async function runAgent(instruction:string) {
     
     try {
-        const result = await OutreachAgent.invoke(
+        const result = await editorAgent.invoke(
             {
                 messages: [new HumanMessage(instruction)],
-                // researchTopic: "ai_marketing_automation"
+                researchTopic: "ai_marketing_automation"
             },
             { callbacks: [opikHandler], recursionLimit: 30 }
         );
-        console.log(result.messages.at(-1)?.content);
+        return result.messages.at(-1)?.content
     } catch (error) {
         console.log(error)
     }
@@ -69,6 +69,6 @@ async function imageGenerator(direction: string, fileName: string) {
     await writeFile(`assets/${fileName}.png`, imageBytes)
     return "Image has been generated"
 }
-console.log(await imageGenerator(instruction, "logo"))
+console.log(await runAgent(instruction))
 
 // await opikHandler.flushAsync();
