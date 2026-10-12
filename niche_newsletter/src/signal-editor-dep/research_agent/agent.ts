@@ -16,14 +16,18 @@ import {
     dynamicSystemPromptMiddleware,
     countTokensApproximately,
     toolErrorMiddleware,
+    toolCallLimitMiddleware,
     type AnyAgentMiddleware,
     type ToolCallRequest
 } from "langchain";
 import { ChatOpenRouter } from "@langchain/openrouter";
+import { Command } from "@langchain/langgraph";
 import { readFile } from 'fs/promises';
 
 import dotenv from 'dotenv';
 import { checkpointer } from "../checkpointer.js";
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
+import { request } from "http";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -35,11 +39,11 @@ async function readConfig(path: string): Promise<string> {
 const researchModel = new ChatOpenRouter({
     model: MODELS.RESEARCH_AGENT,
     temperature: .2,
-    maxTokens: 4096,
+    maxTokens: 15000,
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/research_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/research_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 
 const subAgentNotifyMiddleware = createMiddleware({
@@ -62,7 +66,7 @@ const subAgentNotifyMiddleware = createMiddleware({
 
 // How long the parent waits for its subagents once it has nothing else to do, and how
 // many times it may be sent back to work before it's allowed to finish regardless.
-const SUBAGENT_WAIT_MS = 5 * 60 * 1000;
+const SUBAGENT_WAIT_MS = 3 * 60 * 1000;
 const MAX_SUBAGENT_WAIT_ROUNDS = 3;
 
 // When the parent tries to finish while its subagents are still running, wait for them
@@ -169,6 +173,12 @@ export const researchAgent = createAgent({
         searchRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
         checkUnfinishedSubAgents,
+        toolCallLimitMiddleware({
+          toolName: "spawn_subagent",
+          runLimit: 3,
+          exitBehavior: "continue"
+        } as never) as AnyAgentMiddleware,
+        steeringMiddleware,
         // createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,

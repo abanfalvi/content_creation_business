@@ -94,8 +94,13 @@ export async function applyFindAndReplace(
 ): Promise<FindAndReplaceResult> {
   const content = normalizeNewlines(await readOrInitFile(filePath, initialContent));
   const outcome = findAndReplace(content, normalizeNewlines(to_replace), normalizeNewlines(replace_with));
-  if (outcome.status === "ok") {
-    await writeFile(filePath, outcome.result, "utf-8");
-  }
-  return outcome;
+  if (outcome.status !== "ok") return outcome;
+  const cleaned: FindAndReplaceResult = { status: "ok", result: collapseBlankLines(outcome.result) };
+  await writeFile(filePath, cleaned.result, "utf-8");
+  return cleaned;
 }
+
+// Cutting text (replace_with "") leaves the blank lines that separated it, and an agent can't remove
+// them itself: a whitespace-only to_replace matches every gap, so it is never unique. Runs of 2+ blank
+// lines become one; a single blank line (a paragraph break) is untouched.
+export const collapseBlankLines = (s: string) => s.replace(/\n(?:[ \t]*\n){2,}/g, "\n\n");

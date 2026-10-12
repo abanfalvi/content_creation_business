@@ -19,12 +19,12 @@ const promptSchema = z.object({
     negative_prompt: z.string().describe("Prompt what to avoid when generating the image"),
 });
 
-const instruction = "Try to create an example post on a Notion page like you would do it on beehiiv with an image, does not matter the content. I just want to see how the content written there is compatible with what beehiiv expects.";
+const instruction = "Can you add a new page to the database on Leads - Newsletter on Notion? If yes, add a page";
 
 async function runAgent(instruction:string) {
     
     try {
-        const result = await editorAgent.invoke(
+        const result = await OutreachAgent.invoke(
             {
                 messages: [new HumanMessage(instruction)],
                 researchTopic: "ai_marketing_automation"

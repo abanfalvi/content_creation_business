@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { SMAgentState, type AgentStateType } from "./state.js";
 import { SMTools } from "./tools.js";
@@ -37,7 +38,7 @@ const SMModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/distribution-dep/sm_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/distribution-dep/sm_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -107,6 +108,7 @@ export const SMAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         bufferUserPiiGuard,
         reviewGateMiddleware,
         createVerifyEndRunMiddleware(),

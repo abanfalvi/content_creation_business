@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { onRetry } from "../../shared/on_error.js";
 
 import {
@@ -33,14 +34,11 @@ async function readConfig(path: string): Promise<string> {
 const editorManagerModel = new ChatOpenRouter({
     model: MODELS.SIGNAL_EDITOR_MANAGER,
     temperature: .2,
-    maxTokens: 8192,
+    maxTokens: 15000,
     maxRetries: 2,
-    provider: {
-      sort: "price"
-    }
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/manager/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/manager/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -121,6 +119,7 @@ export const editorManagerAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         applyToolConfig,
         showPromptingGuide,
         createVerifyEndRunMiddleware()

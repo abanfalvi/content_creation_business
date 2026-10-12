@@ -66,7 +66,7 @@ const callRelevanceFilterAgent = tool(
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
         const { relFilterAgent } = await import("../rel_filter_agent/agent.js");
         const topic = runtime.state.researchTopic
-        const threadId = `${managerThreadId ?? "unknown"}:rel_filter_agent`;
+        const threadId = `${managerThreadId ?? "unknown"}:relevance_filter_agent`;
         const result = await streamAgents(
             relFilterAgent, 
             "relevance_filter_agent",

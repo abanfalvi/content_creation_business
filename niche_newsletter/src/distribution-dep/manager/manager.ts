@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { onRetry } from "../../shared/on_error.js";
 import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
@@ -37,7 +38,7 @@ const distributionManagerModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/distribution-dep/manager/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/distribution-dep/manager/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -58,6 +59,7 @@ export const distributionManagerAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,

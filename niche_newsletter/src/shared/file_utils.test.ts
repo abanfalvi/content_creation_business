@@ -50,6 +50,16 @@ test("applyFindAndReplace writes the replacement to disk on a unique match", asy
   assert.equal(await readFile(filePath, "utf-8"), "## Findings\nbar is the key insight.");
 });
 
+test("applyFindAndReplace collapses the blank lines left behind by a cut", async (t) => {
+  const dir = await useTempDir(t);
+  const filePath = join(dir, "notes.md");
+  await writeFile(filePath, "## A\nkeep one\n\n## B\ncut me\n\n## C\nkeep two\n", "utf-8");
+
+  await applyFindAndReplace(filePath, "## B\ncut me\n", "");
+
+  assert.equal(await readFile(filePath, "utf-8"), "## A\nkeep one\n\n## C\nkeep two\n");
+});
+
 test("applyFindAndReplace leaves the file untouched when the match is ambiguous", async (t) => {
   const dir = await useTempDir(t);
   const filePath = join(dir, "notes.md");

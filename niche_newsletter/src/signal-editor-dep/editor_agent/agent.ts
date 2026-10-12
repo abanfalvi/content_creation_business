@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { EditorAgentContext, EditorAgentState, type AgentStateType } from "./state.js";
 import { editorTools } from "./tools.js";
@@ -40,7 +41,7 @@ if (!process.env.BEEHIIV_PUBLICATION_ID) {
     throw new Error("BEEHIIV_PUBLICATION_ID is not set — add it to .env (find it with beehiiv's list_publications).");
 }
 const SYSTEM_PROMPT = (await readConfig("src/signal-editor-dep/editor_agent/SYSTEM_PROMPT_NOTION.md"))
-    .replaceAll("{{BEEHIIV_PUBLICATION_ID}}", process.env.BEEHIIV_PUBLICATION_ID);
+    .replaceAll("{{BEEHIIV_PUBLICATION_ID}}", process.env.BEEHIIV_PUBLICATION_ID) + STEERING_PROMPT;
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -96,6 +97,7 @@ export const editorAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         notionUsersPiiGuard,
         addPromptingTechniqueGuideMiddleware,
         createVerifyEndRunMiddleware(),

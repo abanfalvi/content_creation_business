@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { RelFilterAgentState } from "./state.js";
 import { filteringTools } from "./tools.js";
@@ -34,7 +35,7 @@ const relFilterModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/rel_filter_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/rel_filter_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -55,6 +56,7 @@ export const relFilterAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,

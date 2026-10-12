@@ -15,6 +15,7 @@ import {
 } from "langchain";
 import { ChatOpenRouter } from "@langchain/openrouter";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { basename, join } from "node:path";
 
@@ -31,6 +32,7 @@ import { readOrInitFile } from "../shared/file_utils.js";
 import { glob } from "glob";
 import matter from "gray-matter";
 import { memo } from "react";
+import { steeringMiddleware, STEERING_PROMPT } from "../shared/steering.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -53,7 +55,7 @@ if (!process.env.BEEHIIV_PUBLICATION_ID) {
     throw new Error("BEEHIIV_PUBLICATION_ID is not set — add it to .env (find it with beehiiv's list_publications).");
 }
 const SYSTEM_PROMPT = (await readConfig("src/orchestrator/SYSTEM_PROMPT.md"))
-    .replaceAll("{{BEEHIIV_PUBLICATION_ID}}", process.env.BEEHIIV_PUBLICATION_ID);
+    .replaceAll("{{BEEHIIV_PUBLICATION_ID}}", process.env.BEEHIIV_PUBLICATION_ID) + STEERING_PROMPT;
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -129,10 +131,11 @@ const contentStrategyMiddleware = createMiddleware({
 
 const retrieveMemoryMiddleware = createMiddleware({
   name: "retrieve_memory_middleware",
-  stateSchema: z.object({ relevantMemory: z.string().default("") }),
+  stateSchema: z.object({ relevantMemory: z.string().default(""), prevHumanMessages: z.array(z.string()).default([]) }),
 
   beforeAgent: async (state) => {
     const lastHuman = [...state.messages].reverse().find((m) => HumanMessage.isInstance(m));
+    state.prevHumanMessages.push(lastHuman!.text)
     if (!lastHuman) return { relevantMemory: "" };
     const files = await glob("**/*.md", { cwd: dataPaths.memories() });
     if (files.length == 0) return { relevantMemory: "" }
@@ -169,7 +172,7 @@ const retrieveMemoryMiddleware = createMiddleware({
         decisionsRequest: {
           model: MODELS.OVERLAP_JUDGE_MODEL,
           questions: MEMORY_CHOICES,
-          state: { userQuestion: lastHuman.text },
+          state: { userQuestion: state.prevHumanMessages },
         },
       });
       const answer = response.answers.memoryChoice;
@@ -195,9 +198,68 @@ const retrieveMemoryMiddleware = createMiddleware({
 
 });
 
+const verifyInstructionMiddleware = createMiddleware({
+  name: "verify_manager_instruction_middlware",
 
-// Management notes (content_strategy/, content_plans/, ...) at the root; the orchestrator's skills (read by the skills middleware
-// and opened by the model via read_file) under /skills/.
+  wrapToolCall: async (request, handler) => {
+    if (request.toolCall.name != "call_editor_manager_agent") return handler(request);
+    const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
+    const researchTopic = request.toolCall.args["researchTopic"];
+    // No topic given: the manager reuses the conversation's current one, so there's no file to check.
+    if (!researchTopic) return handler(request);
+
+    // No notes file yet means this is a brand-new topic: nothing to verify against, so let the call through.
+    const notesPath = join(dataPaths.researchScratchPad(), `${slugifyTheme(researchTopic)}_notes.md`);
+    if (!existsSync(notesPath)) return handler(request);
+
+    const INSTRUCTION_VERIFIER = {
+      verificationDecision: {
+        type: "noul",
+        instructions:
+          "Does the information in the instruction to the manager agent correctly references to any of the content of the research notes?",
+        criteria: {
+          true: "All references made are correct or no references have been made that could be incorrect.",
+          false: "Some references are incorrect in the instruction to the manager."
+        },
+      },
+    } satisfies DecisionsQuestions;
+
+    let findings;
+    try {
+      findings = await readFile(notesPath, "utf-8");
+    } catch (error) {
+      console.warn(`[manager instruction verifier] skipped, could not read ${notesPath}: ${String(error)}`);
+      return handler(request);
+    }
+
+    try {
+      const response = await decisionsClient.alpha.decisions.create({
+        decisionsRequest: {
+          model: MODELS.OVERLAP_JUDGE_MODEL,
+          questions: INSTRUCTION_VERIFIER,
+          state: { 
+            instructionToManager: request.toolCall.args,
+            researchNotes: findings
+          },
+        },
+      });
+      const answer = response.answers.verificationDecision;
+      const score = answer?.type === "noul" ? answer.noul : undefined;
+      if (score === undefined || score > 0.6) return handler(request);
+      else {
+        return new ToolMessage({
+          content: `Your tool call was blocked because some incorrect references were found in your instruction that are differently presented in the research notes. Fix the references and call again.`,
+          tool_call_id: request.toolCall.id ?? "",
+        });
+      }
+  } catch (error) {
+      console.warn(`[manager instruction verifier] skipped: ${String(error)}`);
+      return handler(request);
+    }
+  },
+});
+
+
 const orchestratorBackend = new CompositeBackend(
     new FilesystemBackend({rootDir: dataPaths.managementNotes(), virtualMode: true}),
     {
@@ -222,7 +284,9 @@ export const orchestratorAgent = createAgent({
           new ChatOpenRouter({ model: MODELS.ORCHESTRATOR_FALLBACK_2, temperature: .2, maxTokens: 8196, maxRetries: 2 }),
         ),
         contentStrategyMiddleware,
-        retrieveMemoryMiddleware
+        retrieveMemoryMiddleware,
+        verifyInstructionMiddleware,
+        steeringMiddleware,
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: OrchestratortState,

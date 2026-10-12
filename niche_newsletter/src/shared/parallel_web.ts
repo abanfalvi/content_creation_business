@@ -7,7 +7,7 @@ export const parallelClient = new Parallel({ apiKey: process.env.PARALLEL_SEARCH
 export const webSearchSchema = z.object({
     queries: z.array(z.string()).min(1).describe("2-3 concise keyword search queries, 3-6 words each"),
     objective: z.string().optional().describe("Natural-language description of what you're trying to find — used together with queries to focus results on the most relevant content"),
-    mode: z.enum(["turbo", "fast", "basic", "advanced"]).optional().default("fast").describe("turbo: fastest, lower quality. fast (default): high quality within a ~1s budget. basic: low latency, works best with 2-3 high-quality queries. advanced: highest quality, more retrieval/compression, higher latency."),
+    mode: z.enum(["turbo", "fast", "basic"]).optional().default("fast").describe("turbo: fastest, lower quality. fast (default): high quality within a ~1s budget. basic: low latency, works best with 2-3 high-quality queries. Use it wisely and sparingly!"),
     maxResults: z.number().int().min(1).max(20).optional().describe("Max number of results to return"),
     includeDomains: z.array(z.string()).optional().describe("Only return results from these domains, e.g. [\"arxiv.org\", \"github.com\"]"),
 });

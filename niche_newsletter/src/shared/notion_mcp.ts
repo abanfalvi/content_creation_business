@@ -42,15 +42,35 @@ function normalizeNotionId(value: unknown): string | undefined {
     return value.replace(/-/g, "").match(/[0-9a-f]{32}/i)?.[0].toLowerCase();
 }
 
-// The page a database/data source lives on: the first page in its fetched ancestor path,
-// skipping the database/data-source entries in between. Undefined if the fetch failed or
-// had no ancestor path.
-async function owningPageOf(fetchTool: DynamicStructuredTool, id: string, isDataSource: boolean): Promise<string | undefined> {
+// Text of a notion-fetch result, with the MCP wrapper and escaped quotes undone.
+async function fetchText(fetchTool: DynamicStructuredTool, id: string): Promise<string> {
+    const result = await fetchTool.invoke({ id });
+    let text = typeof result === "string" ? result : JSON.stringify(result);
+    try { text = JSON.parse(text).text ?? text; } catch { /* already plain text */ }
+    return text.replace(/\\"/g, '"');
+}
+
+// A data source's own fetch result has no ancestor path, so its page can't be read from it.
+// Check from the page side instead: is it one of the databases embedded on an allowed page?
+async function isDataSourceOnPages(fetchTool: DynamicStructuredTool, dataSourceId: string, pages: Set<string>): Promise<boolean> {
+    for (const page of pages) {
+        try {
+            const text = await fetchText(fetchTool, page);
+            for (const m of text.matchAll(/data-source-url="collection:\/\/([0-9a-f-]+)"/gi)) {
+                if (normalizeNotionId(m[1]) === dataSourceId) return true;
+            }
+        } catch (error) {
+            console.warn(`[notion parent guard] fetch of page ${page} failed: ${String(error)}`);
+        }
+    }
+    return false;
+}
+
+// The page a database lives on: the first page in its fetched ancestor path, skipping the
+// database/data-source entries in between. Undefined if the fetch failed or had no ancestor path.
+async function owningPageOf(fetchTool: DynamicStructuredTool, id: string): Promise<string | undefined> {
     try {
-        const result = await fetchTool.invoke({ id: isDataSource ? `collection://${id}` : id });
-        let text = typeof result === "string" ? result : JSON.stringify(result);
-        try { text = JSON.parse(text).text ?? text; } catch { /* already plain text */ }
-        text = text.replace(/\\"/g, '"');
+        const text = await fetchText(fetchTool, id);
         const chain = text.match(/<ancestor-path>([\s\S]*?)<\/ancestor-path>/)?.[1] ?? "";
         for (const entry of chain.matchAll(/<(?:parent|ancestor-\d+)-(page|database|data-source) url="([^"]+)"/g)) {
             if (entry[1] === "page") return normalizeNotionId(entry[2]);
@@ -64,7 +84,7 @@ async function owningPageOf(fetchTool: DynamicStructuredTool, id: string, isData
 // Returns an error message for the agent when `parent` isn't allowed, or null when it is.
 // Allowed: an allowlisted page itself, or a database (or data source) sitting directly on
 // one. A page *inside* an allowlisted page is not allowed, so content can't nest.
-async function checkParent(parent: any, allowed: Set<string>, fetchTool: DynamicStructuredTool | undefined, envVars: string[]): Promise<string | null> {
+export async function checkParent(parent: any, allowed: Set<string>, fetchTool: DynamicStructuredTool | undefined, envVars: string[]): Promise<string | null> {
     const where = `the page set in ${envVars.join(" / ")}`;
     const refuse = (why: string) => `Refused: ${why}. All Notion content for this agent must go directly under ${where} (or a database sitting directly on it). Retry with that parent.`;
 
@@ -75,11 +95,17 @@ async function checkParent(parent: any, allowed: Set<string>, fetchTool: Dynamic
         return allowed.has(normalizeNotionId(parent.page_id) ?? "") ? null : refuse("that parent page is not the permitted page");
     }
 
-    const databaseId = normalizeNotionId(parent.database_id ?? parent.data_source_id);
-    if (databaseId !== undefined) {
-        if (!fetchTool) return refuse("the database's location couldn't be verified");
-        const owner = await owningPageOf(fetchTool, databaseId, parent.data_source_id !== undefined);
+    if (parent.database_id !== undefined) {
+        const databaseId = normalizeNotionId(parent.database_id);
+        if (databaseId === undefined || !fetchTool) return refuse("the database's location couldn't be verified");
+        const owner = await owningPageOf(fetchTool, databaseId);
         return owner !== undefined && allowed.has(owner) ? null : refuse("that database is not directly on the permitted page");
+    }
+
+    if (parent.data_source_id !== undefined) {
+        const dataSourceId = normalizeNotionId(parent.data_source_id);
+        if (dataSourceId === undefined || !fetchTool) return refuse("the data source's location couldn't be verified");
+        return await isDataSourceOnPages(fetchTool, dataSourceId, allowed) ? null : refuse("that data source is not directly on the permitted page");
     }
 
     return refuse("the parent must be the permitted page or a database on it, not the workspace root");

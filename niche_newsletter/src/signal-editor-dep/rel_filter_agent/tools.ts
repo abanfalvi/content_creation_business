@@ -57,7 +57,7 @@ const editResearchFindings = tool(
         }
     }, {
         name: "edit_research_findings",
-        description: "Trim the research findings to what is relevant",
+        description: "Trim the research findings to what is relevant. Blank lines left behind by a cut are cleaned up automatically, so don't try to remove them.",
         schema: z.object({
             to_replace: z.string(),
             replace_with: z.string()

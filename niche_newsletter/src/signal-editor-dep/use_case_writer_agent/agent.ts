@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { UseCaseWriterAgentState } from "./state.js";
 import { useCaseWriterTools } from "./tools.js";
@@ -34,7 +35,7 @@ const userCaseWriterModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/use_case_writer_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/signal-editor-dep/use_case_writer_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -60,6 +61,7 @@ export const userCaseWriterAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         searchVideosLimitMiddleware,
         createVerifyEndRunMiddleware(),
     ],

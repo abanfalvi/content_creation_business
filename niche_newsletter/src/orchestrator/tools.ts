@@ -42,6 +42,8 @@ const KEEP_BEEHIIV_TOOLS = new Set([
     "get_post"
 ])
 
+const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
+
 const handoffContract = z.object({
     task_id: z.string().describe("Unique id for this assignment"),
     objectives: z.array(z.string()).describe("What this call should accomplish"),
@@ -62,10 +64,25 @@ const listResearchTopics = tool(
     }
 )
 
+const readResearchTopic = tool(
+    async ({ fileTheme }) => {
+        const path = join(dataPaths.researchScratchPad(), `${slugifyTheme(fileTheme)}_notes.md`);
+        try {
+            return await readFile(path, "utf-8");
+        } catch {
+            return `File theme (${fileTheme}) not found. Use list_research_topics to check what are available.`
+        }
+    }, {
+        name: "read_research_topic",
+        description: "Read the full content of the research notes for a topic. If the document has already a summary on top, the filter agent already worked on it.",
+        schema: z.object({
+            fileTheme: z.string().describe("Name of the topic you want to read, exactly as it is used in the file name"),
+        }),
+    }
+);
+
 const GUIDE_MAX_CHARS = 30_000;
 
-// The orchestrator's file tools use virtual paths rooted at the management notes folder ("/post_outlines/x.md"),
-// so resolve against that folder, never outside it, and never create a missing file (a typo'd path must fail loudly).
 async function readPromptingGuide(guidePath: string | undefined): Promise<string> {
     if (!guidePath?.trim()) return "";
     const root = resolve(dataPaths.managementNotes());
@@ -91,10 +108,10 @@ const callEditorManager = tool(
         const topic = researchTopic
             ? researchTopic.toLowerCase().replace(/[^a-z0-9]+/g, "_")
             : runtime.state.researchTopic;
-        if (!topic) throw new Error("No active topic, provide researchTopic");
+        if (!topic) return "No active topic, provide researchTopic";
         // Passed as run context on every call (not checkpointed state): an omitted path means no outline, so one never leaks into a different post.
         const promptingContent = await readPromptingGuide(promptingGuide);
-        const input = {messages: [new HumanMessage({content: instruction})], researchTopic: topic, currentStep: "flexibleWorkflow", isNewsRoundup: isNewsRoundup}
+        const input = {messages: [new HumanMessage({content: JSON.stringify(instruction)})], researchTopic: topic, currentStep: "flexibleWorkflow", isNewsRoundup: isNewsRoundup}
         const result = await streamAgents(editorManagerAgent, "editor_manager", input, threadId, runtime, {promptingGuide: promptingContent});
         return new Command({
             update: {
@@ -106,8 +123,8 @@ const callEditorManager = tool(
         name: "call_editor_manager_agent",
         description: "Call this agent when you want to create a newsletter post, or any other documents",
         schema: z.object({
-            instruction: z.string().describe("What the manager should do"),
-            researchTopic: z.string().describe("Keywords of the topic of research that is used for filename. Only pass it when starting a new newsletter issue. Omit it to keep working on the current one"),
+            instruction: handoffContract,
+            researchTopic: z.string().optional().describe("Keywords of the topic of research that is used for filename. Only pass it when starting a new newsletter issue, or when resuming an older one (copy its exact name from list_research_topics). Omit it to keep working on the current one: any other spelling creates a second notes file for the same issue"),
             step: z.enum(["flexibleWorkflow", "researchStep"]).describe("If a complete content creation pipeline needs to run, use researchStep (research agent -> filtering agent -> use case writer -> editor agent). If not all the specialists have to work on the issue, use flexibleWorkflow."),
             isNewsRoundup: z.boolean().describe("Whether this request or newsletter post is going to be about writing the weekly AI news roundup"),
             promptingGuide: z.string().optional().describe("Path of the markdown file holding the agreed detailed outline for a post on a prompting technique, as you wrote it with write_file (e.g. /post_outlines/few_shot_examples.md). The file's content is delivered to the editor agent directly, so don't paste the outline into the instruction. Pass it on every call about that post, including revisions; omit it for any other post")
@@ -122,7 +139,7 @@ const callDistributionManager = tool(
         const result = await streamAgents(
             distributionManagerAgent, 
             "distribution_manager",
-            {messages: [new HumanMessage({content: instruction})]},
+            {messages: [new HumanMessage({content: JSON.stringify(instruction)})]},
             threadId,
             runtime
         );
@@ -131,7 +148,7 @@ const callDistributionManager = tool(
         name: "call_distribution_manager_agent",
         description: "Call this agent when you the newsletter post should be published on social media or new leads (large Instagram accounts in the newsletter's niche) should be found and logged in Notion, or when you need to know what is currently trending or popular on TikTok and Instagram reels in the niche (it searches by keyword/hashtag and can transcribe the top videos; read-only research). It never contacts anyone.",
         schema: z.object({
-            instruction: z.string().describe("What the manager should do")
+            instruction: handoffContract
         })
     }
 );
@@ -140,7 +157,7 @@ const calDigProdCreationAgent = tool(
     async ({instruction, doc_content_strategy_name},  runtime: ToolRuntime<AgentStateType>) => {
         const { DigProdCreationAgent } = await import("../curriculum-dep/dig_prod_creator_agent/agent.js");
         const currentThreadId = runtime.config.configurable?.thread_id as string | undefined
-        const threadId = `${currentThreadId}:dig_prod_creation_agent`
+        const threadId = `${currentThreadId}:digital_product_creation_agent`
         const fullPath = join(dataPaths.contentStrategy(), `${doc_content_strategy_name.toLocaleLowerCase().replace(" ", "_")}.md`)
         const result = await streamAgents(
             DigProdCreationAgent, 
@@ -169,7 +186,7 @@ const sendAnswerToDigProdCreationAgent = tool(
     async (reviewDecision: { approved: boolean; feedback?: string }, runtime: ToolRuntime<AgentStateType>) => {
         const { DigProdCreationAgent } = await import("../curriculum-dep/dig_prod_creator_agent/agent.js");
         const managerThreadId = runtime.config.configurable?.thread_id as string | undefined
-        const threadId = `${managerThreadId ?? "unknown"}:dig_prod_creation_agent`;
+        const threadId = `${managerThreadId ?? "unknown"}:digital_product_creation_agent`;
 
         const result = await DigProdCreationAgent.invoke(
             new Command({ resume: reviewDecision }),
@@ -188,9 +205,6 @@ const sendAnswerToDigProdCreationAgent = tool(
 );
 
 
-
-// const slugifyTheme = (theme: string) => theme.toLowerCase().trim().replace(/\s+/g, "_");
-
 // const listContentStrategyThemes = tool(
 //     async () => {
 //         const files = await glob("*.md", { cwd: dataPaths.contentStrategy() });
@@ -205,19 +219,6 @@ const sendAnswerToDigProdCreationAgent = tool(
 //     }, {
 //         name: "list_content_strategy_themes",
 //         description: "List the existing content strategy themes (one markdown file per theme), each with a one-line preview. Use this to see what strategy docs already exist before reading, editing, or creating one.",
-//     }
-// );
-
-// const readContentStrategy = tool(
-//     async ({ theme }) => {
-//         const path = join(dataPaths.contentStrategy(), `${slugifyTheme(theme)}.md`);
-//         return await readOrInitFile(path);
-//     }, {
-//         name: "read_content_strategy",
-//         description: "Read the full content strategy document for a theme. If the theme doesn't exist yet, this creates it (empty) rather than erroring — check list_content_strategy_themes first if you're not sure it exists.",
-//         schema: z.object({
-//             theme: z.string().describe("Theme name, e.g. 'AI productivity tools' — matched to its file by slugifying (lowercased, spaces to underscores)"),
-//         }),
 //     }
 // );
 
@@ -377,6 +378,7 @@ const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
 const allTools = [
     listResearchTopics,
+    readResearchTopic,
     callEditorManager,
     callDistributionManager,
     calDigProdCreationAgent,

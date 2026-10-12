@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { UserOutreachAgentState, type AgentStateType } from "./state.js";
 import { outreachTools } from "./tools.js";
@@ -36,7 +37,7 @@ const OutreachModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/distribution-dep/user_outreach_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/distribution-dep/user_outreach_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -56,6 +57,7 @@ export const OutreachAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         createVerifyEndRunMiddleware(),
     ],
     systemPrompt: SYSTEM_PROMPT,

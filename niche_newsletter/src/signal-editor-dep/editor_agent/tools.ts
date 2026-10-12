@@ -1,11 +1,11 @@
 // Draft the newsletter content + create the visuals when applicable
 // Synthesise sources already gathered
 
-import { z } from "zod";
+import { base64, z } from "zod";
 import { mkdir, writeFile } from "fs/promises";
 import { randomUUID } from "node:crypto";
 import { tool, type ToolRuntime } from "@langchain/core/tools";
-import { ToolMessage } from "@langchain/core/messages";
+import { HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
 import { join } from 'path';
 import { OpenRouter } from "@openrouter/sdk";
@@ -148,9 +148,16 @@ const createChart = tool(
             return "Failed: No chart was generated!";
         }
 
+
         return new Command({
             update: {
-                messages: [new ToolMessage({ content: `Chart has been created: ${chartUrl}`, tool_call_id: runtime.toolCallId })],
+                messages: [
+                    new ToolMessage({ content: `Chart has been created: ${chartUrl}`, tool_call_id: runtime.toolCallId }),
+                    new HumanMessage({content: [
+                            {type: "image", url: chartUrl}
+                        ]
+                    })
+                ],
                 chartUrl
             },
         });
@@ -273,7 +280,13 @@ const generateImages = tool(
         const imgUrl = JSON.stringify({ imageUrl: toDirectDropboxUrl(shareUrl), prompt });
         return new Command({
             update: {
-                messages: [new ToolMessage({ content: `Image has been saved successfully: ${imgUrl}`, tool_call_id: runtime.toolCallId })],
+                messages: [
+                    new ToolMessage({ content: `Image has been saved successfully: ${imgUrl}`, tool_call_id: runtime.toolCallId }),
+                    new HumanMessage({content: [
+                            {type: "image", url: imgUrl}
+                        ]
+                    })
+                ],
                 imageUrl: imgUrl
             },
         });

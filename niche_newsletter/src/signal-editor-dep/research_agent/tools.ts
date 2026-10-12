@@ -2,6 +2,7 @@ import { z } from "zod";
 import { tool, type ToolRuntime } from "@langchain/core/tools";
 import { createAgent } from "langchain";
 import { join, basename } from 'path';
+import { readFile } from "node:fs/promises";
 import { randomUUID } from 'node:crypto';
 import { BaseMessage, getBufferString, HumanMessage, RemoveMessage, ToolMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -241,7 +242,8 @@ const skimPreviousFindings = tool(
     const contents: Record<string, any> = {};
     for (const note of prevNotes) {
       const topicName = basename(note, "_notes.md");
-      const raw = await readOrInitFile(note);
+      const raw = await readFile(note, "utf-8");
+      if (!raw.trim()) continue; // empty placeholder notes carry nothing to skim
       const parsed = matter(raw);
       contents[topicName] = parsed.data
     }
@@ -256,8 +258,9 @@ const readPreviousFinding = tool(
     const topic = notesTopic.toLowerCase().replace(/[^a-z0-9]+/g, "_")
     const fullPath = join(dataPaths.researchScratchPad(), `${topic}_notes.md`);
     let content: string;
+    // Plain read, not readOrInitFile: a guessed topic name must fail, not create an empty notes file.
     try {
-        content = await readOrInitFile(fullPath);
+        content = await readFile(fullPath, "utf-8");
       } catch {
         return "File not found, please use the topic names returned in the skimPreviousFindings tool"
       }
@@ -290,8 +293,6 @@ interface SubAgentTask {
   status: "running" | "completed" | "failed";
   result?: string;
   error?: string;
-  /** Whether the parent agent has already been shown this task's result. */
-  delivered?: boolean;
   /** Settles when the subagent finishes either way, so the parent can wait on it. */
   done: Promise<void>;
 }
@@ -304,20 +305,20 @@ const subAgentTasks = new Map<string, SubAgentTask>();
 type FinishedTask = { taskId: string; status: "completed" | "failed"; result?: string; error?: string };
 
 /**
- * Pulls this run's finished (completed/failed) tasks the parent agent hasn't seen yet,
- * marking them delivered so they're only surfaced once, then forgets them.
+ * Pulls this run's finished (completed/failed) tasks the parent agent hasn't seen yet and
+ * removes them from the map, so each is surfaced once and doesn't accumulate.
  */
 export function drainFinishedSubAgentTasks(runId: string): FinishedTask[] {
   const finished: FinishedTask[] = [];
   for (const [taskId, task] of subAgentTasks) {
-    if (task.runId !== runId || task.delivered || task.status === "running") continue;
-    task.delivered = true;
+    if (task.runId !== runId || task.status === "running") continue;
     finished.push({
       taskId,
       status: task.status,
       ...(task.result !== undefined && { result: task.result }),
       ...(task.error !== undefined && { error: task.error }),
     });
+    subAgentTasks.delete(taskId);
   }
   return finished;
 }
@@ -378,7 +379,7 @@ const spawnSubAgent = tool(
     task.done = researchSubAgent
       .invoke(
         { messages: [new HumanMessage(instruction)] },
-        { callbacks: [opikHandler], recursionLimit: 200, context: { agentId: subAgentId, researchRunId } },
+        { callbacks: [opikHandler], recursionLimit: 200, context: { agentId: subAgentId, researchRunId }, signal: runtime.config?.signal! },
       )
       .then((result) => {
         const messages = result.messages as BaseMessage[];
@@ -406,9 +407,10 @@ const spawnSubAgent = tool(
 const checkSubAgentStatus = tool(
   async ({ taskId }, runtime: ToolRuntime<any, ResearchContext>) => {
     const task = subAgentTasks.get(taskId);
-    if (!task || task.runId !== resolveContext(runtime.context).researchRunId) return `No subagent task found for ID '${taskId}'.`;
-    if (task.status !== "running") task.delivered = true;
+    if (!task || task.runId !== resolveContext(runtime.context).researchRunId) return `No subagent task found for ID '${taskId}'. If it finished earlier, its result was already delivered to you in a [Background subagent update] or a previous check — look back in the conversation.`;
     if (task.status === "running") return `Task ${taskId} is still running.`;
+    // Handed over now, so it won't be delivered again and can be forgotten.
+    subAgentTasks.delete(taskId);
     if (task.status === "failed") return `Task ${taskId} failed: ${task.error}`;
     return task.result;
   },

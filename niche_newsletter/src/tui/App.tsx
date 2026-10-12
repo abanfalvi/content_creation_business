@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, measureElement, useApp, useInput, useStdout, type DOMElement } from "ink";
+import { Box, Text, measureElement, useApp, useInput, useStdin, useStdout, type DOMElement } from "ink";
 import { appendFileSync } from "node:fs";
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { orchestratorAgent } from "../orchestrator/orchestrator.js";
@@ -8,6 +8,7 @@ import { checkpointer } from "../orchestrator/checkpointer.js";
 import { opikHandler, MODELS } from "../models.js";
 import { isAgentStep, messagesToEntries, progressEventToEntry, type ChatEntryDraft } from "./message_format.js";
 import type { ProgressEvent } from "../shared/progress_update.js";
+import { steeringMailbox } from "../shared/steering.js";
 import { listSessions, removeSession, touchSession, type Session } from "./sessions.js";
 import { Home } from "./Home.js";
 import { entryToLines } from "./chat_render.js";
@@ -22,7 +23,9 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const SPINNER_INTERVAL_MS = 80;
 const RECURSION_LIMIT = 500;
 const PICKER_VISIBLE_ROWS = 8;
-// Set NL_TUI_DEBUG_INPUT=<file> to log every key/mouse event the TUI receives.
+// Set NL_TUI_DEBUG_INPUT=<file> to log every key/mouse event the TUI receives. Each stdin
+// chunk is logged raw ({"raw": ...}, e.g. "\u001b[57400u" for numpad 1 under the kitty
+// keyboard protocol) followed by what useInput made of it ({"char", "key"}).
 const DEBUG_INPUT_FILE = process.env.NL_TUI_DEBUG_INPUT;
 const SCROLLBAR_WIDTH = 2;
 const WHEEL_STEP = 3;
@@ -36,7 +39,7 @@ const COMMANDS: Command[] = [
     { name: "/mouse", description: "toggle mouse mode (scrollbar dragging vs. text selection)" },
     { name: "/new", description: "start a new session" },
     { name: "/queue", description: "queue another message for the agent" },
-    { name: "/steer", description: "steer the agent into another direction" },
+    { name: "/steer", description: "steer the orchestrator, or a running sub-agent with /steer @agent <message>" },
     { name: "/exit", description: "quit" },
 ];
 
@@ -84,12 +87,13 @@ const formatTokens = (n: number) => {
 
 const formatCost = (usd: number) => `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
 
-function ContextBar({ used, max, cost }: { used: number; max: number; cost: number }) {
+function ContextBar({ used, max, cost, working }: { used: number; max: number; cost: number; working: boolean }) {
     const fraction = Math.min(1, used / max);
     const filled = Math.round(fraction * BAR_WIDTH);
     const color = fraction >= 0.9 ? "red" : fraction >= 0.7 ? "yellow" : "green";
     return (
         <Box paddingX={1} gap={1}>
+            <Text color={working ? "yellow" : "green"}>● {working ? "working" : "ready"}</Text>
             <Text dimColor>context {formatTokens(used)}/{formatTokens(max)} →</Text>
             <Text color={color}>{"█".repeat(filled)}<Text color="gray">{"░".repeat(BAR_WIDTH - filled)}</Text></Text>
             <Text color={color}>{(fraction * 100).toFixed(1)}%</Text>
@@ -183,6 +187,17 @@ function SessionPicker({ sessions, selected, currentId, pendingDeleteId }: {
 export function App({ threadId: initialThreadId, version, cwd }: { threadId: string; version: string; cwd: string }) {
     const { exit } = useApp();
     const { stdout } = useStdout();
+    // Ink reads stdin via "readable"/read(), so a "data" listener would steal input; tap its
+    // internal "input" event (the same one useInput consumes) to log the raw sequences instead.
+    // Not in Ink's public types, but useStdin() returns the whole context at runtime.
+    const { internal_eventEmitter: inputEvents } = useStdin() as unknown as { internal_eventEmitter: NodeJS.EventEmitter };
+
+    useEffect(() => {
+        if (!DEBUG_INPUT_FILE) return;
+        const logRaw = (data: Buffer | string) => appendFileSync(DEBUG_INPUT_FILE, `${JSON.stringify({ raw: data.toString() })}\n`);
+        inputEvents.on("input", logRaw);
+        return () => { inputEvents.off("input", logRaw); };
+    }, [inputEvents]);
     const [threadId, setThreadId] = useState(initialThreadId);
     const [entries, setEntries] = useState<ChatEntry[]>([]);
     const [scrollOffset, setScrollOffset] = useState(0);
@@ -209,9 +224,11 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
     const [menuIndex, setMenuIndex] = useState(0);
     const [picker, setPicker] = useState<{ sessions: Session[]; selected: number } | null>(null);
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-    // Steering messages typed while a run is going. A ref, not state: the stream loop in
-    // handleSubmit is a long-lived closure that has to see messages typed after it started.
-    const steerRef = useRef<string[]>([]);
+    // Sub-agents currently running (name -> how many), from the agent_start/agent_end events.
+    // A ref for the same reason as before: the stream loop is a long-lived closure.
+    const activeAgentsRef = useRef(new Map<string, number>());
+    // Mirror of the ref's keys for rendering the /steer target menu.
+    const [activeAgents, setActiveAgents] = useState<string[]>([]);
     const seenCountRef = useRef(0);
     const entryIdRef = useRef(0);
     const abortRef = useRef<AbortController | null>(null);
@@ -316,6 +333,16 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         : [];
     const menuOpen = !picker && matchingCommands.length > 0;
 
+    // After "/steer " (while a run is going) offer the orchestrator and the running sub-agents,
+    // narrowed by whatever of "@name" has been typed so far.
+    const steerTarget = isProcessing ? input.match(/^\/steer (?:@(\S*))?$/) : null;
+    const targetOptions: Command[] = steerTarget
+        ? [{ name: "@orchestrator", description: "the main agent" },
+           ...activeAgents.map((agent) => ({ name: `@${agent}`, description: "running sub-agent" }))]
+            .filter((option) => option.name.startsWith(`@${steerTarget[1] ?? ""}`))
+        : [];
+    const targetMenuOpen = !picker && targetOptions.length > 0;
+
     const pushEntry = useCallback((entry: ChatEntryDraft) => {
         entryIdRef.current += 1;
         setEntries((prev) => [...prev, { ...entry, id: `e${entryIdRef.current}` }]);
@@ -415,7 +442,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         setStatusText("thinking…");
         const controller = new AbortController();
         abortRef.current = controller;
-        let steered = false;
+        activeAgentsRef.current.clear();
 
         try {
             const stream = await orchestratorAgent.stream(
@@ -433,7 +460,16 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                 if (mode === "custom") {
                     const event = data as ProgressEvent;
                     pushEntry(progressEventToEntry(event));
-                    if (event.type === "agent_start") setStatusText(`🔧 ${event.agent} is working…`);
+                    const active = activeAgentsRef.current;
+                    if (event.type === "agent_start") {
+                        active.set(event.agent, (active.get(event.agent) ?? 0) + 1);
+                        setStatusText(`🔧 ${event.agent} is working…`);
+                    } else if (event.type === "agent_end") {
+                        const left = (active.get(event.agent) ?? 1) - 1;
+                        if (left > 0) active.set(event.agent, left);
+                        else active.delete(event.agent);
+                    }
+                    if (event.type === "agent_start" || event.type === "agent_end") setActiveAgents([...active.keys()]);
                     continue;
                 }
                 const messages = (data.messages ?? []) as BaseMessage[];
@@ -447,42 +483,33 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                         if (entry.role === "status") setStatusText(entry.text);
                     }
                 }
-
-                // Safe steering point: the tools step has finished and been checkpointed, so every
-                // tool call is answered and nothing in flight is lost. Stop here and redirect.
-                if (steerRef.current.length > 0 && ToolMessage.isInstance(messages.at(-1))) {
-                    steered = true;
-                    setStatusText("steering…");
-                    controller.abort();
-                    break;
-                }
             }
         } catch (error) {
-            if (steered) {
-                // The abort we triggered ourselves to steer — not a user cancel or an error.
-            } else if (controller.signal.aborted) {
+            if (controller.signal.aborted) {
                 setQueue([]);
-                steerRef.current = [];
+                steeringMailbox.takeAll();
                 pushEntry({ role: "status", notice: true, text: "■ run cancelled" });
                 await closeDanglingToolCalls(threadId).catch(() => {});
             } else {
-                steerRef.current = [];
+                steeringMailbox.takeAll();
                 pushEntry({ role: "error", text: error instanceof Error ? error.message : String(error) });
             }
         } finally {
-            if (steered) {
-                pushEntry({ role: "status", notice: true, text: "↪ steering after the last tool call" });
-                await closeDanglingToolCalls(threadId).catch(() => {});
-            }
             abortRef.current = null;
+            activeAgentsRef.current.clear();
+            setActiveAgents([]);
             setIsProcessing(false);
             setStatusText("");
         }
 
-        // Deliver steering text: after a steered stop, or typed too late to catch a tool
-        // boundary (the run finished first). Cancels and errors cleared it above.
-        const steerText = steerRef.current.splice(0).join("\n\n");
-        if (steerText) void handleSubmit(steerText);
+        // Steering that no agent picked up because its target finished first (cancels and
+        // errors cleared the mailbox above). Sent as a normal follow-up message so it isn't lost.
+        const leftover = steeringMailbox.takeAll();
+        if (leftover.length > 0) {
+            void handleSubmit(leftover
+                .map(({ target, text }) => target === threadId ? text : `(Sent to ${target}, but it had already finished) ${text}`)
+                .join("\n\n"));
+        }
     }, [threadId, pushEntry, runCommand]);
 
     useEffect(() => {
@@ -519,7 +546,7 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
         }
         // Plain ↑/↓ scroll the chat unless a menu is using them. Many terminals (e.g. on
         // Windows) also translate the mouse wheel into ↑/↓ on the alternate screen.
-        const arrowsScroll = !picker && !menuOpen;
+        const arrowsScroll = !picker && !menuOpen && !targetMenuOpen;
         const page = Math.max(1, viewHeight - 1);
         if (key.pageUp) { scrollBy(page); return; }
         if (key.pageDown) { scrollBy(-page); return; }
@@ -550,6 +577,17 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                     pushEntry({ role: "error", text: error instanceof Error ? error.message : String(error) }));
             }
             return;
+        }
+
+        if (targetMenuOpen) {
+            const selected = Math.min(menuIndex, targetOptions.length - 1);
+            if (key.upArrow) { setMenuIndex(Math.max(0, selected - 1)); return; }
+            if (key.downArrow) { setMenuIndex(Math.min(targetOptions.length - 1, selected + 1)); return; }
+            if (key.tab || key.return) {
+                setMenuIndex(0);
+                setInput(`/steer ${targetOptions[selected]!.name} `);
+                return;
+            }
         }
 
         if (menuOpen) {
@@ -591,18 +629,26 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                 return;
             }
             else if (trimmed.startsWith("/steer")) {
-                const message = trimmed.slice("/steer".length).trim();
-                if (!message) pushEntry({role: "status", notice: true, text: "usage /steer <message>"});
-                else if (isProcessing) {
-                    steerRef.current.push(message);
-                    pushEntry({role: "status", notice: true, text: `↪ will steer after the next tool call: ${message}`});
+                // "/steer @editor_agent make it shorter" targets a running sub-agent; without
+                // @name it steers the orchestrator.
+                const [, typedAgent, message = ""] = trimmed.slice("/steer".length).trim().match(/^(?:@(\S+)(?:\s+|$))?([\s\S]*)$/) ?? [];
+                const agent = typedAgent === "orchestrator" ? undefined : typedAgent;
+                const running = [...activeAgentsRef.current.keys()];
+                if (!message) pushEntry({role: "status", notice: true, text: `usage /steer [@agent] <message>${running.length ? ` · running: ${running.map((a) => "@" + a).join(", ")}` : ""}`});
+                else if (!isProcessing) void handleSubmit(message);
+                else if (agent && !activeAgentsRef.current.has(agent)) {
+                    pushEntry({role: "status", notice: true, text: `no running agent @${agent}${running.length ? ` · running: ${running.map((a) => "@" + a).join(", ")}` : ""}`});
+                    return;
                 }
-                else void handleSubmit(message);
+                else {
+                    steeringMailbox.push(agent ?? threadId, message);
+                    pushEntry({role: "status", notice: true, text: `↪ ${agent ?? "orchestrator"} will be steered before its next step: ${message}`});
+                }
                 setInput("");
                 return;
             }
             if (isProcessing) {
-                pushEntry({role: "status", notice: true, text: "agent is busy - use /queue <message> to run it after the agent finished. Or use /steer <message> to steer after the next tool call"});
+                pushEntry({role: "status", notice: true, text: "agent is busy - use /queue <message> to run it after the agent finished. Or use /steer [@agent] <message> to steer the orchestrator or a running sub-agent"});
                 return;
             }
             if (trimmed.length > 0) {
@@ -670,10 +716,11 @@ export function App({ threadId: initialThreadId, version, cwd }: { threadId: str
                     <SessionPicker sessions={picker.sessions} selected={picker.selected} currentId={threadId} pendingDeleteId={pendingDeleteId} />
                 )}
                 {menuOpen && <CommandMenu commands={matchingCommands} selected={Math.min(menuIndex, matchingCommands.length - 1)} />}
+                {targetMenuOpen && <CommandMenu commands={targetOptions} selected={Math.min(menuIndex, targetOptions.length - 1)} />}
                 <StepsToggle shown={showSteps} />
                 <Box ref={inputRef} flexDirection="column">
                     <InputBox editor={editor} disabled={picker !== null} />
-                    <ContextBar used={contextTokens} max={contextWindow} cost={totalCost} />
+                    <ContextBar used={contextTokens} max={contextWindow} cost={totalCost} working={isProcessing} />
                 </Box>
             </Box>
         </Box>

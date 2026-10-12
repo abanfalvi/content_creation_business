@@ -12,7 +12,10 @@ export const EditorAgentState = z.object({
     reducer: { schema: z.string(), fn: (urls: string[], url: string) => [...urls, url] },
     default: () => [],
   }),
-  imageUrl: z.string().optional(),
+  imageUrl: z.array(z.string()).default([]).register(registry, {
+    reducer: { schema: z.string(), fn: (urls: string[], url: string) => [...urls, url] },
+    default: () => [],
+  }),
 });
 export type AgentStateType = z.infer<typeof EditorAgentState>;
 

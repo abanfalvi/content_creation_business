@@ -47,7 +47,9 @@ export function messagesToEntries(messages: BaseMessage[]): ChatEntryDraft[] {
             if (text) entries.push({ role: "assistant", text });
         } else if (type === "human") {
             const text = contentToText(message.content).trim();
-            if (text) entries.push({ role: "user", text });
+            if (message.additional_kwargs?.lc_source === "user_steering") {
+                entries.push({ role: "status", notice: true, text: `↪ steered: ${text.replace(/<\/?user_steering>/g, "").trim()}` });
+            } else if (text) entries.push({ role: "user", text });
         }
     }
 
@@ -59,6 +61,7 @@ export function progressEventToEntry(event: ProgressEvent): ChatEntryDraft {
     switch (event.type) {
         case "agent_start": return { ...base, role: "status", text: `▶ ${event.agent} started` };
         case "agent_end": return { ...base, role: "status", text: `■ ${event.agent} finished` };
+        case "steered": return { ...base, role: "status", notice: true, text: `↪ ${event.agent} steered: ${event.text}` };
         case "tool_call": {
             const args = JSON.stringify(event.args) ?? "";
             const preview = args.length > TOOL_ARGS_PREVIEW_LENGTH ? `${args.slice(0, TOOL_ARGS_PREVIEW_LENGTH)}…` : args;

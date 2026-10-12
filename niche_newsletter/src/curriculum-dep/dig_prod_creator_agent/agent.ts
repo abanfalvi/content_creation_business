@@ -1,3 +1,4 @@
+import { steeringMiddleware, STEERING_PROMPT } from "../../shared/steering.js";
 import { MODELS } from "../../models.js";
 import { DigProdCreationAgentState, type AgentStateType } from "./state.js";
 import { KEEP_CANVA_TOOLS, productCreationTools } from "./tools.js";
@@ -38,7 +39,7 @@ const DigProdCreationModel = new ChatOpenRouter({
     maxRetries: 2
 })
 
-const SYSTEM_PROMPT = await readConfig("src/curriculum-dep/dig_prod_creator_agent/SYSTEM_PROMPT.md")
+const SYSTEM_PROMPT = await readConfig("src/curriculum-dep/dig_prod_creator_agent/SYSTEM_PROMPT.md") + STEERING_PROMPT
 
 const modelCallRetryMiddleware = modelRetryMiddleware({
   maxRetries: 3,
@@ -101,6 +102,7 @@ export const DigProdCreationAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        steeringMiddleware,
         reviewGateMiddleware,
         toolsConfig,
         createVerifyEndRunMiddleware(),
