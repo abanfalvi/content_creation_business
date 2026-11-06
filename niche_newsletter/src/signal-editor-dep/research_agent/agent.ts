@@ -91,7 +91,9 @@ const checkUnfinishedSubAgents = createMiddleware({
       }
       if (state.subAgentWaitRounds >= MAX_SUBAGENT_WAIT_ROUNDS) return undefined;
 
+      const signal = runtime.signal;
       const allDone = await waitForSubAgentTasks(researchRunId, SUBAGENT_WAIT_MS);
+      signal?.throwIfAborted(); 
       const finished = drainFinishedSubAgentTasks(researchRunId);
       const stillRunning = getRunningSubAgentTasks(researchRunId);
       if (finished.length === 0 && stillRunning.length === 0) return undefined;

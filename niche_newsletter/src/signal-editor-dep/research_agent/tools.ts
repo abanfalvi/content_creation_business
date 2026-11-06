@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { tool, type ToolRuntime } from "@langchain/core/tools";
-import { createAgent } from "langchain";
+import { createAgent, createMiddleware } from "langchain";
 import { join, basename } from 'path';
 import { readFile } from "node:fs/promises";
 import { randomUUID } from 'node:crypto';
@@ -295,6 +295,9 @@ interface SubAgentTask {
   error?: string;
   /** Settles when the subagent finishes either way, so the parent can wait on it. */
   done: Promise<void>;
+  //** To work with subagents after they have been set off */
+  inbox?: string[],
+  agentId?: string
 }
 
 // Module-scoped, in-memory only — tasks don't survive a process restart and
@@ -332,15 +335,22 @@ export function getRunningSubAgentTasks(runId: string): string[] {
  * Waits until all of this run's running tasks have finished, or `timeoutMs` passes.
  * Returns true if everything finished in time.
  */
-export async function waitForSubAgentTasks(runId: string, timeoutMs: number): Promise<boolean> {
+export async function waitForSubAgentTasks(runId: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
   const pending = [...subAgentTasks.values()].filter((t) => t.runId === runId && t.status === "running").map((t) => t.done);
   if (pending.length === 0) return true;
   let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   const timedOut = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); });
+  const aborted = new Promise<false>((resolve) => {
+    if (signal?.aborted) return resolve(false);
+    onAbort = () => resolve(false);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    return await Promise.race([Promise.all(pending).then(() => true as const), timedOut]);
+    return await Promise.race([Promise.all(pending).then(() => true as const), timedOut, aborted]);
   } finally {
     clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -353,15 +363,42 @@ export function formatFinishedSubAgentTasks(finished: FinishedTask[]): string {
     .join("\n\n---\n\n");
 }
 
+function drainSubAgentInbox(agentId: string) {
+  let msgList: string[] = [];
+  for (const [taskId, task] of subAgentTasks) {
+    if (task.agentId !== agentId || task.status !== "running") continue;
+    if (typeof task.inbox !== "undefined") {
+      msgList = task.inbox.splice(0)
+    }
+  }
+  return msgList;
+};
+
 const subAgentModel = new ChatOpenRouter({ model: MODELS.RESEARCH_AGENT, temperature: 0.2, maxTokens: 4096, maxRetries: 2 });
 
 const SUBAGENT_SYSTEM_PROMPT = "You are a focused research subagent. A parent research agent has given you one specific question or sub-task — investigate it thoroughly using web search, then return a concise, well-sourced write-up (what you found, why it matters, sources). Don't ask for clarification — do the best job you can with the instruction given. Your response is the only thing the parent agent sees, so make it self-contained.";
+
+const subAgentInboxMiddleware = createMiddleware({
+  name: "subAgentInboxMiddleware",
+  contextSchema: researchContextSchema,
+  beforeModel: async (_state, runtime) => {
+    const { agentId } = resolveContext(runtime.context);
+    const msgs = drainSubAgentInbox(agentId);   // finds the running task by agentId, splices its inbox
+    if (msgs.length === 0) return {};
+    return {
+      messages: [new HumanMessage({
+        content: `[Message from parent agent]\n\n${msgs.join("\n\n")}`,
+        additional_kwargs: { lc_source: "parent_message" },
+      })],
+    };
+  },
+});
 
 const researchSubAgent = createAgent({
   model: subAgentModel,
   tools: [webSearchTool, extractWebContentTool],
   systemPrompt: SUBAGENT_SYSTEM_PROMPT,
-  middleware: [siblingSearchesMiddleware],
+  middleware: [siblingSearchesMiddleware, subAgentInboxMiddleware],
   contextSchema: researchContextSchema,
   store: sharedSearchStore,
 });
@@ -374,7 +411,7 @@ const spawnSubAgent = tool(
     // Recorded under the subagent's id so the parent and siblings see the angle as claimed.
     await recordAssignment(runtime.store, { agentId: subAgentId, researchRunId }, instruction);
 
-    const task: SubAgentTask = { runId: researchRunId, status: "running", done: Promise.resolve() };
+    const task: SubAgentTask = { runId: researchRunId, status: "running", done: Promise.resolve(), agentId: subAgentId, inbox: [] };
     subAgentTasks.set(taskId, task);
     task.done = researchSubAgent
       .invoke(
@@ -423,4 +460,53 @@ const checkSubAgentStatus = tool(
   }
 );
 
-export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, extractWebContentTool, skimPreviousFindings, readPreviousFinding, spawnSubAgent, checkSubAgentStatus];
+const goingToSleep = tool(
+  async ({ seconds }, runtime: ToolRuntime<any, ResearchContext>) => {
+    const ms = Math.min(Math.max(seconds, 1), 300) * 1000;
+    const { researchRunId } = resolveContext(runtime.context);
+    // const task = subAgentTasks.get(taskId);
+    // if (!task || task.runId !== resolveContext(runtime.context).researchRunId) return `No subagent task found for ID '${taskId}'. If it finished earlier, its result was already delivered to you in a [Background subagent update] or a previous check — look back in the conversation.`;
+    const signal = runtime.config?.signal;
+    const allDone = await waitForSubAgentTasks(researchRunId, ms);
+    signal?.throwIfAborted(); 
+    const finished = drainFinishedSubAgentTasks(researchRunId);
+    const stillRunning = getRunningSubAgentTasks(researchRunId);
+    if (finished.length === 0 && stillRunning.length === 0) return "No running task and no new finished task. Return to the user.";
+
+    const parts = [];
+    if (finished.length > 0) parts.push(`[Background subagent update]\n\n${formatFinishedSubAgentTasks(finished)}`);
+    if (!allDone && stillRunning.length > 0) {
+      parts.push(`[Subagent check] ${stillRunning.length} subagent task(s) are still running after waiting ${ms / 1000} minutes:\n${stillRunning.map((id) => `- ${id}`).join("\n")}. If you have completed all your tasks, call this tool again. `);
+    }
+    parts.push("Incorporate these results before finishing.");
+    return parts.join("\n\n")
+  }, {
+    name: "going_to_sleep",
+    description: "Use this method to put yourself into sleep because your subagents are still running, but you already finished your task and you only want to wait for their results.",
+    schema: z.object({
+      seconds: z.number().describe("Time in seconds you want to wait for the subagents to finish."),
+    })
+  }
+);
+
+const steerSubAgent = tool(
+  async ({taskId, message}) => {
+    let feedback;
+    for (const [Id, task] of subAgentTasks) {
+      if (Id !== taskId || task.status !== "running") continue;
+      task.inbox?.push(message);
+      feedback = "Message has been queued. The agent will receive it after the next tool call."
+    }
+    if (!feedback) feedback = "Message cannot be queued as the agent finished running"
+    return feedback
+  }, {
+    name: "steer_subagent",
+    description: "Use this tool when you want to give additional instructions to a subagent that it should take into account. The agent will receive it after the next tool call.",
+    schema: z.object({
+      taskId: z.string().describe("The exact task ID returned by spawn_subagent. Pass it verbatim."),
+      message: z.string().describe("Message to the subagent")
+    })
+  }
+)
+
+export const researchTools = [webSearchTool, compressContext, readScratchPad, editScratchPad, addContent, readTodos, writeTodos, extractWebContentTool, skimPreviousFindings, readPreviousFinding, spawnSubAgent, checkSubAgentStatus, goingToSleep];
