@@ -229,7 +229,7 @@ export const specialistProblems: EvalProblem[] = [
             "The document includes a checklist page summarizing the steps.",
             "A rendered document URL was produced before the review gate.",
         ],
-        required_tools: ["read_proposed_document_content", "create_document"],
+        required_tools: ["read_proposed_document_content", "write_sandboxed_code", "exec_cmd_sandboxed", "sandboxed_save_pdf"],
         expects_interrupt: true,
     },
 

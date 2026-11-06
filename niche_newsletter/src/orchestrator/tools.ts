@@ -208,7 +208,7 @@ const sendAnswerToDigProdCreationAgent = tool(
         return result.messages.at(-1)?.content;
     }, {
         name: "send_review_answer_to_dig_prod_creation_agent",
-        description: "Resume the digital product agent's paused document (paused when it tried to call create_document, for you to review the pending code/args) with your review decision. Approving lets it actually render and host the document as-is; rejecting sends it back with concrete feedback to revise before trying again.",
+        description: "Resume the digital product agent's paused document (paused when it tried to call finalize_document, for you to review the draft it already rendered and hosted) with your review decision. Approving lets it finalize the document as-is; rejecting sends it back with concrete feedback to revise the script and re-render before trying again.",
         schema: z.object({
             approved: z.boolean().describe("Whether to approve the pending document for rendering/hosting as-is"),
             feedback: z.string().optional().describe("Required when approved is false — concrete, specific feedback for the digital product agent to revise the document"),

@@ -14,7 +14,7 @@ import * as QuickChartModule from 'quickchart-js';
 import type { ChartConfiguration } from 'quickchart-js';
 import { DropboxResponseError } from 'dropbox';
 import { getDropbox } from "../../shared/dropbox.js";
-import { EditorAgentState } from "./state.js";
+import { EditorAgentState, type AgentStateType } from "./state.js";
 import { MODELS } from "../../models.js";
 import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../../shared/file_utils.js";
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js"
@@ -140,6 +140,51 @@ const chartConfigSchema = z.object({
 }).loose()
     .describe("A Chart.js configuration object. Common fields are structured here for guidance, but any additional valid Chart.js key for the chosen chart type (e.g. `cutout` for doughnut, `scales.r` for radar) is accepted as-is.");
 
+function checkE2BApiKey(): boolean {
+    const e2bApiKey = process.env.E2B_API_KEY;
+    if (!e2bApiKey) {
+        return false;
+    } else {
+        return true
+    }
+}
+
+async function connectOrCreateSandbox(state: AgentStateType) {
+    const existingSandboxId = state.sandboxId;
+    if (existingSandboxId) {
+        try {
+            const sandbox = await Sandbox.connect(existingSandboxId);
+            return sandbox;
+        } catch {
+            // Expired or unreachable: fall through and start a fresh one.
+        }
+    }
+
+    let sandbox: Sandbox;
+    try {
+        // 5 minutes covers a cold `npm install`; every tool call extends it afterwards.
+        sandbox = await Sandbox.create({ timeoutMs: 5 * 60_000 });
+        return sandbox
+    } catch (error) {
+        return `Could not start the sandbox: ${error}`;
+    }
+
+    // const existingSandboxId = state.sandboxId;
+    // let sandbox: Sandbox | undefined;
+    // try {
+    //     if (existingSandboxId) {
+    //         sandbox = await Sandbox.connect(existingSandboxId);
+    //     } else {
+    //         // 5 minutes covers a cold `npm install` plus the render; extended below
+    //         // once the render succeeds, to give a reviewer time to look at it.
+    //         sandbox = await Sandbox.create("newsletter-visual-gen", { timeoutMs: 5 * 60_000 });
+    //     }
+    //     return sandbox
+    // } catch (error) {
+    //     return `Could not ${existingSandboxId ? "reconnect to" : "start"} the sandbox: ${error}`;
+    // }
+}
+
 const createChart = tool(
     async ({ config, width, height, backgroundColor }, runtime: ToolRuntime<typeof EditorAgentState>) => {
         const myChart = new QuickChart();
@@ -181,72 +226,92 @@ const createChart = tool(
     }
 )
 
-const createRichVisuals = tool(
-    async ({ fileName, code, editExistingVisual }, runtime: ToolRuntime<typeof EditorAgentState>) => {
-        const e2bApiKey = process.env.E2B_API_KEY;
-        if (!e2bApiKey) {
+function sandboxReply(sandbox: Sandbox, runtime: ToolRuntime<typeof EditorAgentState>, content: string) {
+    return new Command({
+        update: {
+            sandboxId: sandbox.sandboxId,
+            messages: [new ToolMessage({ content, tool_call_id: runtime.toolCallId })],
+        },
+    });
+}
+
+// Keeps the sandbox alive between the agent's steps; each call pushes the deadline out.
+const SANDBOX_IDLE_TIMEOUT_MS = 10 * 60_000;
+
+const sandboxRead = tool(
+    async ({ path }, runtime: ToolRuntime<typeof EditorAgentState>) => {
+        if (!checkE2BApiKey()) {
             return "E2B_API_KEY is not set — cannot run the visual-generation sandbox.";
         }
+
+        const sandbox = await connectOrCreateSandbox(runtime.state)
+        if (typeof sandbox === "string") return sandbox
+        await sandbox.setTimeout(SANDBOX_IDLE_TIMEOUT_MS);
+
+        try {
+            const fileContent = await sandbox.files.read(path);
+            return sandboxReply(sandbox, runtime, fileContent);
+        } catch {
+            const entries = await sandbox.files.list("/home/user");
+            return sandboxReply(sandbox, runtime, `File not found: ${path}. Files in /home/user: ${entries.map(e => e.name).join(", ")}`);
+        }
+    }, {
+        name: "read_sandboxed_code",
+        description: "Read a text file from the visual-generation sandbox (e.g. the generate.tsx you wrote earlier, to review or patch it). Relative paths resolve against /home/user, the sandbox's working directory. If the file does not exist, the reply lists the files in /home/user so you can correct the path. Only for text files; to look at the rendered PNG, use sandboxed_save_image.",
+        schema: z.object({
+            path: z.string().describe("Path of the file to read, relative to /home/user (e.g. 'generate.tsx') or absolute"),
+        }),
+    }
+);
+
+const sandboxCmdExec = tool(
+    async ({ cmd }, runtime: ToolRuntime<typeof EditorAgentState>) => {
+        if (!checkE2BApiKey()) {
+            return "E2B_API_KEY is not set — cannot run the visual-generation sandbox.";
+        }
+
+        const sandbox = await connectOrCreateSandbox(runtime.state)
+        if (typeof sandbox === "string") return sandbox
+        await sandbox.setTimeout(SANDBOX_IDLE_TIMEOUT_MS);
+
+        try {
+            const result = await sandbox.commands.run(cmd, { timeoutMs: 90_000 });
+            return sandboxReply(sandbox, runtime, `Exit code 0.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+        } catch (error) {
+            if (error instanceof CommandExitError) {
+                return sandboxReply(sandbox, runtime, `Command failed (exit code ${error.exitCode}).\nstdout:\n${error.stdout}\nstderr:\n${error.stderr}`);
+            }
+            // Timeouts and transport errors: report them rather than crash the agent run.
+            return sandboxReply(sandbox, runtime, `Command did not complete: ${error}`);
+        }
+    }, {
+        name: "exec_cmd_sandboxed",
+        description: "Run a shell command in the visual-generation sandbox and get back its exit code, stdout and stderr. The sandbox persists between your calls (files and installed packages stay), and the working directory is /home/user. Typical uses: run your script with `npx tsx generate.tsx`; inspect the environment with `ls`, `pwd` or `ls node_modules/@expo-google-fonts`; check that output.png exists. react, satori, @resvg/resvg-js, tsx and the Inter / JetBrains Mono fonts are preinstalled, so don't run npm install. A command is stopped after 90 seconds. A non-zero exit code is returned as text, not an error: read stderr, fix the script with write_sandboxed_code, and run again.",
+        schema: z.object({
+            cmd: z.string().describe("Shell command to run from /home/user, e.g. 'npx tsx generate.tsx'"),
+        }),
+    }
+);
+
+const sandboxSaveImage = tool(
+    async ({ fileName }, runtime: ToolRuntime<typeof EditorAgentState>) => {
+        if (!checkE2BApiKey()) {
+            return "E2B_API_KEY is not set — cannot run the visual-generation sandbox.";
+        }
+
         const dropbox = getDropbox();
         if (typeof dropbox === "string") return dropbox;
 
-        const existingSandboxId = runtime.state.sandboxId;
-        let sandbox: Sandbox | undefined;
-        let isReconnect = false;
-        try {
-            if (existingSandboxId && editExistingVisual) {
-                sandbox = await Sandbox.connect(existingSandboxId);
-                isReconnect = true;
-            } else {
-                // 5 minutes covers a cold `npm install` plus the render; extended below
-                // once the render succeeds, to give a reviewer time to look at it.
-                sandbox = await Sandbox.create("newsletter-visual-gen", { timeoutMs: 2 * 60_000 });
-            }
-        } catch (error) {
-            return `Could not ${existingSandboxId ? "reconnect to" : "start"} the sandbox: ${error}`;
-        }
+        const sandbox = await connectOrCreateSandbox(runtime.state)
+        if (typeof sandbox === "string") return sandbox
 
         try {
-            await sandbox.files.write([
-                { path: "generate.tsx", data: code },
-                // ...(isReconnect ? [] : [
-                //     { path: "tsconfig.json", data: SANDBOX_TSCONFIG },
-                //     { path: "package.json", data: SANDBOX_PACKAGE_JSON },
-                // ])
-            ]);
-
-            // if (!isReconnect) {
-            //     try {
-            //         await sandbox.commands.run(`npm install --no-audit --no-fund ${SANDBOX_DEPS}`, { timeoutMs: 180_000 });
-            //     } catch (error) {
-            //         await sandbox.kill()
-            //         if (error instanceof CommandExitError) {
-            //             return `Sandbox dependency install failed:\n${error.stderr || error.stdout}`;
-            //         }
-            //         throw error;
-            //     }
-            // }
-
-            try {
-                await sandbox.commands.run("npx tsx generate.tsx", { timeoutMs: 90_000 });
-            } catch (error) {
-                const persistedSandboxId = sandbox.sandboxId;
-                if (error instanceof CommandExitError) {
-                    return new Command({
-                        update: {
-                            sandboxId: persistedSandboxId,
-                            messages: [new ToolMessage({ content: `Your script failed to run inside the sandbox:\n${error.stderr || error.stdout}`, tool_call_id: runtime.toolCallId })],
-                        },
-                    });
-                }
-                throw error;
-            }
-
             let pngBytes: Uint8Array;
             try {
                 pngBytes = await sandbox.files.read("output.png", { format: "bytes" });
             } catch {
-                return `Your script ran without error but never wrote "output.png" — call resvg with 'output.png' at the end of it to render it.`;
+                const entries = await sandbox.files.list("/home/user");
+                return sandboxReply(sandbox, runtime, `There is no "output.png" in /home/user — your script must render to that exact path with resvg. Files in /home/user: ${entries.map(e => e.name).join(", ")}`);
             }
 
             const name = fileName.toLowerCase().replace(/\s+/g, "_");
@@ -255,12 +320,12 @@ const createRichVisuals = tool(
             try {
                 documentUrl = await uploadToDropboxAndGetShareUrl(dropbox, dropboxPath, Buffer.from(pngBytes));
             } catch (error) {
-                return error instanceof Error ? error.message : `Failed to host the generated document: ${error}`;
+                return sandboxReply(sandbox, runtime, error instanceof Error ? error.message : `Failed to host the generated document: ${error}`);
             }
 
             // Give a reviewer room to look at the result before the sandbox auto-kills;
             // finalize_document kills it for real once a human approves.
-            await sandbox.setTimeout(30 * 60_000);
+            await sandbox.setTimeout(20 * 60_000);
 
             return new Command({
                 update: {
@@ -276,25 +341,53 @@ const createRichVisuals = tool(
                     ],
                 },
             });
+
         } catch (error) {
-            await sandbox.kill();
-            return `Visual generation failed: ${error}`;
+            return sandboxReply(sandbox, runtime, `Saving the image failed: ${error}`);
         }
     }, {
-        name: "create_rich_visuals",
+        name: "sandboxed_save_image",
         description: [
-            "Create a designed graphic with exact text — flowchart, process or architecture overview, comparison table, stat/key-number card, timeline, checklist, pull-quote, annotated schematic, infographic, or section banner. Use it for everything that is not a data chart (use create_chart) or a hero/illustration image (use generate_image).",
-            "You supply a TypeScript script as `code`; it is saved as generate.tsx and run with tsx in a sandbox that has react, satori and @resvg/resvg-js preinstalled. The script must lay the graphic out with Satori (JSX + flexbox styles), render it to PNG with resvg, and write it to `output.png` in the working directory. The PNG is hosted and its URL returned, and the render is attached so you can review it before embedding.",
-            "Fonts: Inter and JetBrains Mono are installed as static TTFs, e.g. node_modules/@expo-google-fonts/inter/800ExtraBold/Inter_800ExtraBold.ttf (pattern: node_modules/@expo-google-fonts/<package>/<weight>/<Family>_<weight>.ttf). Read them with fs and pass them to Satori's `fonts` option; WOFF2 is not supported.",
-            "Satori rules: flexbox only (no CSS grid); every element with more than one child needs display: 'flex'; set boxSizing: 'border-box' on the root; draw arrows, icons and symbols as inline SVG, not text glyphs (the fonts lack them, and emoji are unsupported).",
-            "Design for email: 1200 px wide canvas (shown at 600 px), text readable at half size, strong contrast, solid background, one idea per graphic, all text in Spanish.",
-            "If the render has problems, fix the script and call again with editExistingVisual: true.",
+            "Publish the graphic your script rendered: reads /home/user/output.png from the sandbox, hosts it on Dropbox, and returns its URL together with the render attached as an image so you can review it. This is the last step of the visual workflow, and the only one with an effect outside the sandbox.",
+            "Call it after exec_cmd_sandboxed has run your script successfully. If output.png is missing, the reply lists the files in /home/user so you can see where the script wrote it.",
+            "Always look at the attached render before embedding the URL. If anything is clipped, misaligned or misspelled, fix generate.tsx with write_sandboxed_code, run it again with exec_cmd_sandboxed, and call this tool again with the same fileName.",
         ].join("\n\n"),
         schema: z.object({
             fileName: z.string().describe("Short descriptive name for the visual, used as the hosted file name (e.g. 'flujo de aprobacion')"),
-            code: z.string().describe("Complete TypeScript source for generate.tsx. Must write the rendered PNG to output.png."),
-            editExistingVisual: z.boolean().describe("Set to true to re-run in the same sandbox after fixing your previous visual; false (default) starts a fresh sandbox").default(false)
-        })
+        }),
+    }
+);
+
+const sandboxWriteFiles = tool(
+    async ({ path, content }, runtime: ToolRuntime<typeof EditorAgentState>) => {
+        if (!checkE2BApiKey()) {
+            return "E2B_API_KEY is not set — cannot run the visual-generation sandbox.";
+        }
+
+        const sandbox = await connectOrCreateSandbox(runtime.state)
+        if (typeof sandbox === "string") return sandbox
+        await sandbox.setTimeout(SANDBOX_IDLE_TIMEOUT_MS);
+
+        try {
+            await sandbox.files.write([{ path, data: content }]);
+            return sandboxReply(sandbox, runtime, `Saved ${path} in the sandbox. Run it with exec_cmd_sandboxed.`);
+        } catch (error) {
+            return sandboxReply(sandbox, runtime, `Could not write ${path}: ${error}`);
+        }
+    }, {
+        name: "write_sandboxed_code",
+        description: [
+            "Write a file into the visual-generation sandbox (creating or overwriting it). Use it to save the TypeScript script `generate.tsx` that draws a graphic with exact text — flowchart, process or architecture overview, comparison table, stat/key-number card, timeline, checklist, pull-quote, annotated schematic, infographic, or section banner. Use this workflow for everything that is not a data chart (use create_chart) or a hero/illustration image (use generate_image).",
+            "Workflow: write_sandboxed_code (path 'generate.tsx') -> exec_cmd_sandboxed ('npx tsx generate.tsx') -> sandboxed_save_image. To fix a problem, write the corrected full file again and rerun; use read_sandboxed_code to look at what is currently there.",
+            "The script runs with tsx from /home/user, where react, satori and @resvg/resvg-js are preinstalled. It must lay the graphic out with Satori (JSX + flexbox styles), render it to PNG with resvg, and write it to `output.png` in the working directory. Any other filename won't be picked up by sandboxed_save_image.",
+            "Fonts: Inter and JetBrains Mono are installed as static TTFs, e.g. node_modules/@expo-google-fonts/inter/800ExtraBold/Inter_800ExtraBold.ttf (pattern: node_modules/@expo-google-fonts/<package>/<weight>/<Family>_<weight>.ttf). Read them with fs and pass them to Satori's `fonts` option; WOFF2 is not supported.",
+            "Satori rules: flexbox only (no CSS grid); every element with more than one child needs display: 'flex'; set boxSizing: 'border-box' on the root; draw arrows, icons and symbols as inline SVG, not text glyphs (the fonts lack them, and emoji are unsupported).",
+            "Design for email: 1200 px wide canvas (shown at 600 px), text readable at half size, strong contrast, solid background, one idea per graphic, all text in Spanish.",
+        ].join("\n\n"),
+        schema: z.object({
+            path: z.string().describe("Where to write the file, relative to /home/user. Use 'generate.tsx' for the graphic script."),
+            content: z.string().describe("Complete contents of the file (for generate.tsx: the full TypeScript source, which must write the rendered PNG to output.png)."),
+        }),
     }
 );
 
@@ -428,4 +521,4 @@ const generateImages = tool(
 const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS, { envVars: ["NOTION_DRAFT_PAGE"] });
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
-export const editorTools = [getResearchFindings, generateImages, createChart, createRichVisuals, ...beehiivTools, ...notionTools];
+export const editorTools = [getResearchFindings, generateImages, createChart, sandboxWriteFiles, sandboxCmdExec, sandboxRead, sandboxSaveImage, ...beehiivTools, ...notionTools];

@@ -70,10 +70,10 @@ const reviewGateMiddleware = createMiddleware({
 
     if (!decision.approved) {
       // finalize_document's handler never runs, so its sandbox stays alive —
-      // the agent's next create_document call reconnects to it instead of
+      // the agent's next sandbox tool call reconnects to it instead of
       // starting a fresh one.
       return new ToolMessage({
-        content: `Document not approved by manager review${decision.feedback ? `: ${decision.feedback}` : "."} The sandbox is still running — call create_document again with the fix.`,
+        content: `Document not approved by manager review${decision.feedback ? `: ${decision.feedback}` : "."} The sandbox is still running — fix generate.tsx with write_sandboxed_code, rerun it with exec_cmd_sandboxed, then call sandboxed_save_pdf and finalize_document again.`,
         tool_call_id: request.toolCall.id ?? "",
       });
     }

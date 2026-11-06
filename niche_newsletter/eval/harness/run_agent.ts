@@ -115,8 +115,10 @@ async function readArtifact(problem: EvalProblem, topic: string, result: Record<
         case "use_case_writer_agent":
             return { label: "Final how-to file", content: await read(useCasesPath(topic)) };
         case "dig_prod_creator_agent": {
-            const code = lastToolArgs(messagesOf(result), "create_document")?.code;
-            return { label: "Last create_document script", content: typeof code === "string" ? code : "(create_document was never called)" };
+            const lastScript = toolCallsOf(messagesOf(result))
+                .filter((call) => call.name === "write_sandboxed_code" && call.args.path === "generate.tsx")
+                .at(-1)?.args.content;
+            return { label: "Last generate.tsx script", content: typeof lastScript === "string" ? lastScript : "(generate.tsx was never written)" };
         }
         case "memory_agent":
             return { label: "Memories folder after the run", content: await dumpMemoryTree() };
