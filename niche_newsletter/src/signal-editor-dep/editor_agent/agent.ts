@@ -3,6 +3,7 @@ import { MODELS } from "../../models.js";
 import { EditorAgentContext, EditorAgentState, type AgentStateType } from "./state.js";
 import { editorTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createSkillsMiddlewares } from "../../shared/skills.js";
 import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
@@ -22,6 +23,7 @@ import { ToolMessage } from "@langchain/core/messages";
 import { readFile } from 'fs/promises';
 import dotenv from 'dotenv';
 import { request } from "http";
+import { checkpointer } from "../checkpointer.js";
 
 // dotenv.config(); // loaded via --import dotenv/config in bin/niche_newsletter.js
 
@@ -97,6 +99,7 @@ export const editorAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        ...createSkillsMiddlewares("editor_agent", { readResearchNotes: true }),
         steeringMiddleware,
         notionUsersPiiGuard,
         addPromptingTechniqueGuideMiddleware,
@@ -104,5 +107,6 @@ export const editorAgent = createAgent({
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: EditorAgentState,
-    contextSchema: EditorAgentContext
+    contextSchema: EditorAgentContext,
+    checkpointer: checkpointer
 });

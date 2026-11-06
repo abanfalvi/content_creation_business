@@ -28,5 +28,8 @@ export const MODELS = {
     ORCHESTRATOR_FALLBACK_1: "deepseek/deepseek-v4.1-flash",
     ORCHESTRATOR_FALLBACK_2: "poolside/laguna-xs-2.1",
 
+    SKILL_OPTIMIZER_MODEL: "z-ai/glm-5.3-flash",
+    TRACE_SUMMARIZER_MODEL: "inclusionai/ling-3.0-flash",
+
 } as const;
 

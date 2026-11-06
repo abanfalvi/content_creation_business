@@ -16,6 +16,7 @@ export const EditorAgentState = z.object({
     reducer: { schema: z.string(), fn: (urls: string[], url: string) => [...urls, url] },
     default: () => [],
   }),
+  sandboxId: z.string().optional().default("")
 });
 export type AgentStateType = z.infer<typeof EditorAgentState>;
 

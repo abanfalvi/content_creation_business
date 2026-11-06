@@ -13,7 +13,7 @@ type Invokable = { invoke(input: unknown, config?: unknown): Promise<Record<stri
 
 // Dynamic imports, so agent modules (and their MCP loaders) only load after the runner
 // has set EVAL_MODE, and only for the suites actually being run.
-const AGENTS: Record<AgentName, () => Promise<Invokable>> = {
+export const AGENTS: Record<AgentName, () => Promise<Invokable>> = {
     research_agent: async () => (await import("../../src/signal-editor-dep/research_agent/agent.js")).researchAgent as unknown as Invokable,
     rel_filter_agent: async () => (await import("../../src/signal-editor-dep/rel_filter_agent/agent.js")).relFilterAgent as unknown as Invokable,
     use_case_writer_agent: async () => (await import("../../src/signal-editor-dep/use_case_writer_agent/agent.js")).userCaseWriterAgent as unknown as Invokable,
@@ -97,7 +97,8 @@ function buildInput(problem: EvalProblem, topic: string): Record<string, unknown
     if (problem.agent === "system" || problem.agent === "memory_agent") {
         return { messages: [new HumanMessage(problem.message ?? "")] };
     }
-    const messages = [new HumanMessage({ content: JSON.stringify(problem.handoff) })];
+    // Skill-regression cases replay the stored first message as-is instead of a built handoff.
+    const messages = [new HumanMessage({ content: problem.handoff ? JSON.stringify(problem.handoff) : (problem.message ?? "") })];
     switch (problem.agent) {
         case "sm_agent": return { messages };
         case "dig_prod_creator_agent": return { messages, doc_content_path: strategyPath(topic) };

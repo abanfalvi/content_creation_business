@@ -20,6 +20,8 @@ import { applyFindAndReplace, appendFileEnsuringDir, readOrInitFile } from "../.
 import { getBeehiivMCP } from "../../shared/beehiiv_mcp.js"
 import { getNotionMCP } from "../../shared/notion_mcp.js";
 import { dataPaths } from "../../shared/paths.js";
+import { Sandbox, CommandExitError, Template } from "e2b";
+import { uploadToDropboxAndGetShareUrl } from "../../shared/upload_to_dropbox.js";
 
 // Write tools are hidden for now, due to tier gate
 const KEEP_BEEHIIV_TOOLS = new Set([
@@ -77,6 +79,12 @@ const KEEP_NOTION_TOOLS = new Set([
     "notion-get-users",
     "notion-get-async-task",
 ]);
+
+// const SANDBOX_DEPS = "react@19.3.0 @resvg/resvg-js satori@0.63.2 @resvg/resvg-js tsx@4.23.13 @expo-google-fonts/inter@0.4.2 @expo-google-fonts/jetbrains-mono@0.4.1";
+// const SANDBOX_TSCONFIG = JSON.stringify({
+//     compilerOptions: { jsx: "react-jsx", module: "esnext", moduleResolution: "bundler", esModuleInterop: true },
+// });
+// const SANDBOX_PACKAGE_JSON = JSON.stringify({ name: "visual-gen", private: true, type: "module" });
 
 // TS 7's nodenext resolution can't fully model this package's shape (conditional `exports`
 // map + a `.d.ts` with no `"type"` field to disambiguate CJS/ESM) and falls back to an
@@ -172,6 +180,123 @@ const createChart = tool(
         }),
     }
 )
+
+const createRichVisuals = tool(
+    async ({ fileName, code, editExistingVisual }, runtime: ToolRuntime<typeof EditorAgentState>) => {
+        const e2bApiKey = process.env.E2B_API_KEY;
+        if (!e2bApiKey) {
+            return "E2B_API_KEY is not set — cannot run the visual-generation sandbox.";
+        }
+        const dropbox = getDropbox();
+        if (typeof dropbox === "string") return dropbox;
+
+        const existingSandboxId = runtime.state.sandboxId;
+        let sandbox: Sandbox | undefined;
+        let isReconnect = false;
+        try {
+            if (existingSandboxId && editExistingVisual) {
+                sandbox = await Sandbox.connect(existingSandboxId);
+                isReconnect = true;
+            } else {
+                // 5 minutes covers a cold `npm install` plus the render; extended below
+                // once the render succeeds, to give a reviewer time to look at it.
+                sandbox = await Sandbox.create("newsletter-visual-gen", { timeoutMs: 2 * 60_000 });
+            }
+        } catch (error) {
+            return `Could not ${existingSandboxId ? "reconnect to" : "start"} the sandbox: ${error}`;
+        }
+
+        try {
+            await sandbox.files.write([
+                { path: "generate.tsx", data: code },
+                // ...(isReconnect ? [] : [
+                //     { path: "tsconfig.json", data: SANDBOX_TSCONFIG },
+                //     { path: "package.json", data: SANDBOX_PACKAGE_JSON },
+                // ])
+            ]);
+
+            // if (!isReconnect) {
+            //     try {
+            //         await sandbox.commands.run(`npm install --no-audit --no-fund ${SANDBOX_DEPS}`, { timeoutMs: 180_000 });
+            //     } catch (error) {
+            //         await sandbox.kill()
+            //         if (error instanceof CommandExitError) {
+            //             return `Sandbox dependency install failed:\n${error.stderr || error.stdout}`;
+            //         }
+            //         throw error;
+            //     }
+            // }
+
+            try {
+                await sandbox.commands.run("npx tsx generate.tsx", { timeoutMs: 90_000 });
+            } catch (error) {
+                const persistedSandboxId = sandbox.sandboxId;
+                if (error instanceof CommandExitError) {
+                    return new Command({
+                        update: {
+                            sandboxId: persistedSandboxId,
+                            messages: [new ToolMessage({ content: `Your script failed to run inside the sandbox:\n${error.stderr || error.stdout}`, tool_call_id: runtime.toolCallId })],
+                        },
+                    });
+                }
+                throw error;
+            }
+
+            let pngBytes: Uint8Array;
+            try {
+                pngBytes = await sandbox.files.read("output.png", { format: "bytes" });
+            } catch {
+                return `Your script ran without error but never wrote "output.png" — call resvg with 'output.png' at the end of it to render it.`;
+            }
+
+            const name = fileName.toLowerCase().replace(/\s+/g, "_");
+            const dropboxPath = `/newsletter_images/rich_visuals/${name}.png`;
+            let documentUrl: string;
+            try {
+                documentUrl = await uploadToDropboxAndGetShareUrl(dropbox, dropboxPath, Buffer.from(pngBytes));
+            } catch (error) {
+                return error instanceof Error ? error.message : `Failed to host the generated document: ${error}`;
+            }
+
+            // Give a reviewer room to look at the result before the sandbox auto-kills;
+            // finalize_document kills it for real once a human approves.
+            await sandbox.setTimeout(30 * 60_000);
+
+            return new Command({
+                update: {
+                    sandboxId: sandbox.sandboxId,
+                    // pendingDocumentUrl: documentUrl,
+                    messages: [
+                        new ToolMessage({ content: [ 
+                            {type: "text", text: `"${fileName}" rendered with the following url (${documentUrl}), you should review it (attached) and check if you are content with the result. If not, go back to correct it.`},
+                            ], tool_call_id: runtime.toolCallId }),
+                        new HumanMessage({content: [
+                            {type: "image", source_type: "base64", data: Buffer.from(pngBytes).toString("base64"), mime_type: "png", metadata: { filename: `${name}.png` }}
+                        ]})
+                    ],
+                },
+            });
+        } catch (error) {
+            await sandbox.kill();
+            return `Visual generation failed: ${error}`;
+        }
+    }, {
+        name: "create_rich_visuals",
+        description: [
+            "Create a designed graphic with exact text — flowchart, process or architecture overview, comparison table, stat/key-number card, timeline, checklist, pull-quote, annotated schematic, infographic, or section banner. Use it for everything that is not a data chart (use create_chart) or a hero/illustration image (use generate_image).",
+            "You supply a TypeScript script as `code`; it is saved as generate.tsx and run with tsx in a sandbox that has react, satori and @resvg/resvg-js preinstalled. The script must lay the graphic out with Satori (JSX + flexbox styles), render it to PNG with resvg, and write it to `output.png` in the working directory. The PNG is hosted and its URL returned, and the render is attached so you can review it before embedding.",
+            "Fonts: Inter and JetBrains Mono are installed as static TTFs, e.g. node_modules/@expo-google-fonts/inter/800ExtraBold/Inter_800ExtraBold.ttf (pattern: node_modules/@expo-google-fonts/<package>/<weight>/<Family>_<weight>.ttf). Read them with fs and pass them to Satori's `fonts` option; WOFF2 is not supported.",
+            "Satori rules: flexbox only (no CSS grid); every element with more than one child needs display: 'flex'; set boxSizing: 'border-box' on the root; draw arrows, icons and symbols as inline SVG, not text glyphs (the fonts lack them, and emoji are unsupported).",
+            "Design for email: 1200 px wide canvas (shown at 600 px), text readable at half size, strong contrast, solid background, one idea per graphic, all text in Spanish.",
+            "If the render has problems, fix the script and call again with editExistingVisual: true.",
+        ].join("\n\n"),
+        schema: z.object({
+            fileName: z.string().describe("Short descriptive name for the visual, used as the hosted file name (e.g. 'flujo de aprobacion')"),
+            code: z.string().describe("Complete TypeScript source for generate.tsx. Must write the rendered PNG to output.png."),
+            editExistingVisual: z.boolean().describe("Set to true to re-run in the same sandbox after fixing your previous visual; false (default) starts a fresh sandbox").default(false)
+        })
+    }
+);
 
 const getResearchFindings = tool(
     async (_input, runtime: ToolRuntime<typeof EditorAgentState>) => {
@@ -303,4 +428,4 @@ const generateImages = tool(
 const notionTools = await getNotionMCP(KEEP_NOTION_TOOLS, { envVars: ["NOTION_DRAFT_PAGE"] });
 const beehiivTools = await getBeehiivMCP(KEEP_BEEHIIV_TOOLS);
 
-export const editorTools = [getResearchFindings, generateImages, createChart, ...beehiivTools, ...notionTools];
+export const editorTools = [getResearchFindings, generateImages, createChart, createRichVisuals, ...beehiivTools, ...notionTools];

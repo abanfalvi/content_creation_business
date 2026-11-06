@@ -18,6 +18,8 @@ import { saveIntoMemories } from "../shared/call_memory_agent.js";
 import { streamAgents } from "../shared/progress_update.js";
 import { isEvalMode, sideEffectLog } from "../shared/eval_guard.js";
 import { addScheduledRun, cancelScheduledRun, listScheduledRuns, sanitizePrompt, type ScheduledRun } from "../shared/scheduled_runs.js";
+import { evaluateAgentTraces } from "../../self_evolution/skill_evolution/llm_judges.js";
+import { loadThreadTranscript } from "../../self_evolution/skill_evolution/trace_transcript.js";
 
 function lastMessageContent(result: { messages: { content: unknown }[] }): string {
     const last = result.messages.at(-1);
@@ -166,6 +168,16 @@ const calDigProdCreationAgent = tool(
             threadId,
             runtime
         );
+        try {
+            const { checkpointer: curriculumCheckpointer } = await import("../curriculum-dep/checkpointer.js");
+            const transcript = await loadThreadTranscript(curriculumCheckpointer, threadId)
+            if (transcript) {
+                await evaluateAgentTraces(transcript, "dig_prod_creator_agent", [], { department: "curriculum-dep" })
+            }
+        } catch (err) {
+            console.warn("[skill-evals] scoring digital_product_creation_agent failed:", err)
+        }
+
         return new Command({
             update: {
                 messages: [new ToolMessage({content: lastMessageContent(result), tool_call_id: runtime.toolCallId})],
@@ -310,10 +322,10 @@ const callMemoryManageAgent = tool(
 );
 
 const describeRun = (r: ScheduledRun) =>
-    ({ id: r.id, runAt: new Date(r.runAt).toString(), repeat: r.repeat, allowDistribution: r.allowDistribution ?? false, prompt: r.prompt });
+    ({ id: r.id, runAt: new Date(r.runAt).toString(), repeat: r.repeat, prompt: r.prompt });
 
 const scheduleRun = tool(
-    async ({ prompt: rawPrompt, runAt, delayMinutes, repeat, allowDistribution }) => {
+    async ({ prompt: rawPrompt, runAt, delayMinutes, repeat }) => {
         let prompt: string;
         try {
             prompt = sanitizePrompt(rawPrompt);
@@ -333,20 +345,19 @@ const scheduleRun = tool(
         }
         let run: ScheduledRun;
         try {
-            run = addScheduledRun(prompt, when, repeat ?? "once", allowDistribution ?? false);
+            run = addScheduledRun(prompt, when, repeat ?? "once");
         } catch (error) {
             return error instanceof Error ? error.message : String(error);
         }
-        return { scheduled: describeRun(run), note: "Created as a Windows Task Scheduler task. It runs headlessly in its own session (visible in the TUI's /sessions) when the time comes, and a run missed while the PC was off starts when it's back on and the user is logged in." };
+        return { scheduled: describeRun(run), note: "Added to the schedule. A scheduled job on GitHub checks for due runs at fixed times and starts this one at the first check after the set time, so it can start later than asked. It runs headlessly in a cloud sandbox, so the PC doesn't need to be on. The session is not kept in the TUI's /sessions: the run's output goes to the GitHub Actions log, and anything it saves (notes, Notion, Dropbox) persists." };
     }, {
         name: "schedule_run",
-        description: "Schedule a prompt to be run by you (the orchestrator) later, once or on a daily/weekly repeat. This creates a Windows Task Scheduler task that starts a headless run in a fresh session, with nobody watching and nobody able to answer questions or approve anything, so write the prompt as a complete, self-contained instruction. Only schedule a publish or outreach if the user already agreed to that concrete plan.",
+        description: "Schedule a prompt to be run by you (the orchestrator) later, once or on a daily/weekly repeat. This adds it to the schedule, and a scheduled job on GitHub later starts a headless run in a fresh session in a cloud sandbox, with nobody watching and nobody able to answer questions or approve anything, so write the prompt as a complete, self-contained instruction. Only schedule a publish or outreach if the user already agreed to that concrete plan.",
         schema: z.object({
             prompt: z.string().describe("Self-contained instruction to run, including every detail you would need (topic, angle, constraints) since you won't have this conversation's context in mind"),
             runAt: z.string().optional().describe("When to run, ISO 8601 (e.g. 2026-10-07T09:00 — local time if no offset is given). Use instead of delayMinutes"),
             delayMinutes: z.number().optional().describe("Run this many minutes from now. Use instead of runAt"),
             repeat: z.enum(["once", "daily", "weekly"]).optional().describe("Repeat after the first run. Defaults to once"),
-            allowDistribution: z.boolean().optional().describe("Let the unattended run call the distribution manager (publishing, outreach). Defaults to false: set true only when the user explicitly approved that concrete publish plan for this schedule"),
         }),
     }
 );
@@ -368,7 +379,7 @@ const cancelScheduledRunTool = tool(
         return cancelScheduledRun(id) ? `Cancelled scheduled run ${id}.` : `No scheduled run with id ${id}.`;
     }, {
         name: "cancel_scheduled_run",
-        description: "Cancel a scheduled run and delete its Windows scheduled task (all future repeats too). Get the id from list_scheduled_runs.",
+        description: "Cancel a scheduled run and remove it from the schedule (all future repeats too). Get the id from list_scheduled_runs.",
         schema: z.object({ id: z.string().describe("Id of the scheduled run") }),
     }
 );

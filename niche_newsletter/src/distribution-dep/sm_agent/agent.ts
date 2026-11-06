@@ -3,6 +3,7 @@ import { MODELS } from "../../models.js";
 import { SMAgentState, type AgentStateType } from "./state.js";
 import { SMTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createSkillsMiddlewares } from "../../shared/skills.js";
 import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
@@ -108,6 +109,7 @@ export const SMAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        ...createSkillsMiddlewares("sm_agent", { readResearchNotes: true }),
         steeringMiddleware,
         bufferUserPiiGuard,
         reviewGateMiddleware,

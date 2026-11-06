@@ -11,7 +11,8 @@ import {
     toolErrorMiddleware,
     type AnyAgentMiddleware,
 } from "langchain";
-import { createFilesystemMiddleware, FilesystemBackend } from "deepagents";
+import { CompositeBackend, createFilesystemMiddleware, createSkillsMiddleware, FilesystemBackend } from "deepagents";
+import { skillsBackend } from "../shared/skills.js";
 import { ChatOpenRouter } from "@langchain/openrouter";
 import { ToolMessage } from "@langchain/core/messages";
 import { readFile } from 'fs/promises';
@@ -50,6 +51,12 @@ const modelCallRetryMiddleware = modelRetryMiddleware({
   onFailure: "continue",
 }) as AnyAgentMiddleware;
 
+// The memories tree stays the default; skills are mounted beside it, as in the orchestrator.
+const memoryBackend = new CompositeBackend(
+    new FilesystemBackend({rootDir: dataPaths.memories(), virtualMode: true}),
+    {"/skills/": skillsBackend("memory_agent")},
+);
+
 export const memoryManageAgent = createAgent({
     model: memoryManageModel,
     tools: memoryManageAgentTools,
@@ -57,9 +64,10 @@ export const memoryManageAgent = createAgent({
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
         createFilesystemMiddleware({
-            backend: new FilesystemBackend({rootDir: dataPaths.memories(), virtualMode: true}),
+            backend: memoryBackend,
             tools: ["ls", "read_file", "edit_file", "write_file", "glob", "grep"],
-        })
+        }),
+        createSkillsMiddleware({ backend: memoryBackend, sources: ["/skills/"] }),
     ],
     systemPrompt: SYSTEM_PROMPT,
     stateSchema: MemoryManageAgentState,

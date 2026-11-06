@@ -1,0 +1,13 @@
+{
+  "name": "visual-gen",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "19.3.0",
+    "satori": "0.63.2",
+    "tsx": "4.23.13",
+    "@resvg/resvg-js": "0.49.0",
+    "@expo-google-fonts/inter": "0.4.2",
+    "@expo-google-fonts/jetbrains-mono": "0.4.1"
+  }
+}

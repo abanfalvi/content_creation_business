@@ -4,11 +4,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dataPaths } from "./paths.js";
+import { pullState, pushState } from "./state_sync.js";
 
 
 export type Repeat = "once" | "daily" | "weekly";
-// allowDistribution: the unattended run may call the distribution manager (publishing / outreach).
-export type ScheduledRun = { id: string; prompt: string; runAt: string; repeat: Repeat; createdAt: string; allowDistribution?: boolean };
+export type ScheduledRun = { id: string; prompt: string; runAt: string; repeat: Repeat; createdAt: string;};
 
 const MAX_PROMPT_LENGTH = 4000;
 const MAX_ACTIVE_RUNS = 20;
@@ -102,6 +102,24 @@ function unregisterOsTask(id: string): void {
     );
 }
 
+// The GitHub runner decides what is due from the pushed registry, so edits start from the latest one and
+// must be pushed to count. Both do nothing unless DATA_ROOT is a clone of the state repo (see state_sync.ts).
+function pullRegistry(): void {
+    try {
+        pullState();
+    } catch (error) {
+        throw new Error(`Could not update the state repo before changing the schedule, so nothing was changed: ${error instanceof Error ? error.message : error}`);
+    }
+}
+
+function pushRegistry(message: string): void {
+    try {
+        pushState(message);
+    } catch (error) {
+        throw new Error(`The schedule was changed locally, but pushing it to the state repo failed (${error instanceof Error ? error.message : error}). Until it is pushed, the scheduled runs on GitHub won't see the change. Run "npm run state:sync" to retry.`);
+    }
+}
+
 export function listScheduledRuns(): ScheduledRun[] {
     return readAll().sort((a, b) => a.runAt.localeCompare(b.runAt));
 }
@@ -110,8 +128,31 @@ export function getScheduledRun(id: string): ScheduledRun | undefined {
     return readAll().find((r) => r.id === id);
 }
 
-export function addScheduledRun(prompt: string, runAt: Date, repeat: Repeat, allowDistribution = false): ScheduledRun {
+export function listDueScheduledRuns(now = new Date()): ScheduledRun[] {
+    return listScheduledRuns().filter((r) => new Date(r.runAt) <= now);
+}
+
+// Called by the launcher before it starts a run: a one-off is dropped, a repeating run moves to its next
+// slot after now (missed slots are skipped, not caught up). Done up front so a crashed run isn't retried
+// on the next tick, which matters when a run can publish.
+export function completeScheduledRun(id: string, now = new Date()): void {
+    const runs = readAll();
+    const run = runs.find((r) => r.id === id);
+    if (!run) return;
+    if (run.repeat === "once") {
+        writeAll(runs.filter((r) => r.id !== id));
+        return;
+    }
+    const step = (run.repeat === "daily" ? 1 : 7) * 24 * 60 * 60 * 1000;
+    let next = new Date(run.runAt).getTime();
+    while (next <= now.getTime()) next += step;
+    run.runAt = new Date(next).toISOString();
+    writeAll(runs);
+}
+
+export function addScheduledRun(prompt: string, runAt: Date, repeat: Repeat): ScheduledRun {
     if (runAt.getTime() - Date.now() > MAX_HORIZON_MS) throw new Error("Runs can be scheduled at most a year ahead.");
+    pullRegistry();
     const existing = readAll();
     if (existing.length >= MAX_ACTIVE_RUNS) {
         throw new Error(`There are already ${MAX_ACTIVE_RUNS} scheduled runs (the limit). Cancel one first.`);
@@ -122,19 +163,21 @@ export function addScheduledRun(prompt: string, runAt: Date, repeat: Repeat, all
         runAt: runAt.toISOString(),
         repeat,
         createdAt: new Date().toISOString(),
-        ...(allowDistribution && { allowDistribution }),
     };
-    registerOsTask(run);
+    // registerOsTask(run);
     writeAll([...existing, run]);
+    pushRegistry(`Schedule run ${run.id}`);
     return run;
 }
 
-// Removes the registry entry and its Task Scheduler task. False if no such run exists.
+// Removes the registry entry and pushes the change to the state repo. False if no such run exists.
 export function cancelScheduledRun(id: string): boolean {
+    pullRegistry();
     const runs = readAll();
     const remaining = runs.filter((r) => r.id !== id);
     if (remaining.length === runs.length) return false;
-    unregisterOsTask(id);
+    // unregisterOsTask(id);
     writeAll(remaining);
+    pushRegistry(`Cancel scheduled run ${id}`);
     return true;
 }

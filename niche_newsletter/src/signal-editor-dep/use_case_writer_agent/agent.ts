@@ -3,6 +3,7 @@ import { MODELS } from "../../models.js";
 import { UseCaseWriterAgentState } from "./state.js";
 import { useCaseWriterTools } from "./tools.js";
 import { onRetry } from "../../shared/on_error.js";
+import { createSkillsMiddlewares } from "../../shared/skills.js";
 import { createVerifyEndRunMiddleware } from "../../shared/verify_end_run.js";
 
 import {
@@ -61,6 +62,7 @@ export const userCaseWriterAgent = createAgent({
     middleware: [
         modelCallRetryMiddleware,
         toolErrorMiddleware({onError: onRetry}),
+        ...createSkillsMiddlewares("use_case_writer_agent", { readResearchNotes: true }),
         steeringMiddleware,
         searchVideosLimitMiddleware,
         createVerifyEndRunMiddleware(),

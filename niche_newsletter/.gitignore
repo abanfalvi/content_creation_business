@@ -35,6 +35,7 @@ coverage/
 assets/PROJECT.md
 management_notes/
 assets/RESEARCH_REPORT.md
+assets/SELF_IMPROVEMENT_PAPERS.md
 src/signal-editor-dep/research_agent/scratch_pad
 src/signal-editor-dep/use_case_writer_agent/scratch_pad
 src/signal-editor-dep/editor_agent/charts
@@ -45,8 +46,10 @@ src/distribution-dep/.checkpoints
 src/orchestrator/.checkpoints
 src/curriculum-dep/.checkpoints
 src/signal-editor-dep/.checkpoints
+self_evolution/skill_evolution/skill_optimizer/tmp_skills
 .beehiiv-*
 pdf_playground/output/
+self_evolution/skill_evolution/trace_summaries.json
 
 memories/
 transcripts/

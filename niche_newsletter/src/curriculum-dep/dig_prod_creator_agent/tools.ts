@@ -13,6 +13,7 @@ import dotenv from 'dotenv';
 import { readOrInitFile } from "../../shared/file_utils.js";
 import { readFile } from "fs/promises";
 import { getCanvaMCP } from "../../shared/canva_mcp.js";
+import { uploadToDropboxAndGetShareUrl } from "../../shared/upload_to_dropbox.js";
 
 export const KEEP_CANVA_TOOLS = new Set([   
     'export-design',
@@ -40,45 +41,6 @@ export const KEEP_CANVA_TOOLS = new Set([
     // 'list-brand-kits',
     'get-design-candidates',
 ]);
-
-function toDirectDropboxUrl(shareUrl: string): string {
-    const url = new URL(shareUrl);
-    url.searchParams.delete("dl");
-    url.searchParams.set("raw", "1");
-    return url.toString();
-}
-
-// Shared by generate_image and create_document — both just need "these bytes, hosted at
-// a public URL" and don't care about the Dropbox-specific mechanics to get there.
-async function uploadToDropboxAndGetShareUrl(dropbox: Dropbox, path: string, contents: Buffer): Promise<string> {
-
-    let uploadedPath: string;
-    try {
-        const uploadResult = await dropbox.filesUpload({
-            path,
-            contents,
-            mode: { '.tag': 'overwrite' },
-            mute: true,
-        });
-        uploadedPath = uploadResult.result.path_lower ?? path;
-    } catch (error) {
-        throw new Error(`Dropbox upload failed: ${error}`);
-    }
-
-    try {
-        const shareResult = await dropbox.sharingCreateSharedLinkWithSettings({
-            path: uploadedPath,
-            settings: { audience: { '.tag': 'public' } },
-        });
-        return toDirectDropboxUrl(shareResult.result.url);
-    } catch (error) {
-        const existingUrl = (error instanceof DropboxResponseError
-            ? (error.error as { shared_link_already_exists?: { metadata?: { url?: string } } })?.shared_link_already_exists?.metadata?.url
-            : undefined);
-        if (!existingUrl) throw new Error(`Dropbox share-link creation failed: ${error}`);
-        return toDirectDropboxUrl(existingUrl);
-    }
-}
 
 // Versions pinned to match this repo's own package.json, so scripts render the same way
 // inside the sandbox as they would with the repo's own installed dependencies.

@@ -51,7 +51,7 @@ You can call it at any point, but don't interrupt the work for it: a good moment
 ## Scheduling — running work later
 
 - **`schedule_run`** / **`list_scheduled_runs`** / **`cancel_scheduled_run`** — have yourself run a prompt later, once or daily/weekly (e.g. the weekly AI news roundup), in a headless session with nobody to answer questions or approve anything. **Follow the `schedule-recurring-run` skill** whenever the user wants something run later or on a repeat, or wants to see or cancel schedules.
-- The publish checkpoint above applies at scheduling time: only schedule a publish or outreach step (and only set `allowDistribution`) if the user already agreed to that concrete plan; otherwise schedule the drafting and leave publishing for when they're back.
+- The publish checkpoint above applies at scheduling time: only schedule a publish or outreach step if the user already agreed to that concrete plan; otherwise schedule the drafting and leave publishing for when they're back.
 
 ## Analytics — read-only, to ground strategy in real performance
 

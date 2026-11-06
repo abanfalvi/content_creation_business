@@ -26,7 +26,7 @@ import { orchestratorTools } from "./tools.js";
 import { checkpointer } from "./checkpointer.js";
 import { CompositeBackend, createFilesystemMiddleware, createSkillsMiddleware, FilesystemBackend, StateBackend } from "deepagents";
 import { dataPaths } from "../shared/paths.js";
-import { type DecisionsRequest } from "@openrouter/sdk/models";
+import { type DecisionsNoulQuestion, type DecisionsRequest } from "@openrouter/sdk/models";
 import { OpenRouter } from "@openrouter/sdk";
 import { readOrInitFile } from "../shared/file_utils.js";
 import { glob } from "glob";
@@ -46,9 +46,6 @@ const orchestratorModel = new ChatOpenRouter({
     temperature: .2,
     maxTokens: 15000,
     maxRetries: 2,
-    provider: {
-      sort: "price"
-    }
 })
 
 if (!process.env.BEEHIIV_PUBLICATION_ID) {
@@ -154,31 +151,34 @@ const retrieveMemoryMiddleware = createMiddleware({
     }))).filter((m): m is NonNullable<typeof m> => m !== undefined);
     if (memories.length === 0) return { relevantMemory: "" };
 
-    const MEMORY_CHOICES = {
-      memoryChoice: {
-        type: "choice",
-        instructions:
-          "Which of the saved memory contents could provide valuable context to the agent?",
-        criteria: {
-          none: "None of the saved memories can provide relevant context for the agent",
-          ...Object.fromEntries(
-            memories.map(({name, description}) => [ name, description ])
-          )
-        },
-      },
-    } satisfies DecisionsQuestions;
+    const MEMORY_QUESTIONS = Object.fromEntries(
+      memories.map(({ name, description }, i) => {
+        const question: DecisionsNoulQuestion = {
+          type: "noul",
+          instructions: `Would the saved memory "${name}" (${description}) provide valuable context for answering the user's question? Only answer yes if its content is likely to change or inform what the agent does.`,
+          criteria: {
+            true: "This memory is relevant to the user's question and would help the agent.",
+            false: "This memory is unrelated to the user's question.",
+          },
+        };
+        return [`memory_${i}`, question];
+      })
+    ) satisfies DecisionsQuestions;
     try {
       const response = await decisionsClient.alpha.decisions.create({
         decisionsRequest: {
           model: MODELS.OVERLAP_JUDGE_MODEL,
-          questions: MEMORY_CHOICES,
+          questions: MEMORY_QUESTIONS,
           state: { userQuestion: state.prevHumanMessages },
         },
       });
-      const answer = response.answers.memoryChoice;
-      const choiceMade = answer?.type === "choice" ? answer.choice : undefined;
-      const picked = memories.find((m) => m.name === choiceMade);
-      return { relevantMemory: picked?.content ?? "" };
+
+      const picked = memories.filter((_m, i) => {
+        const answer = response.answers[`memory_${i}`];
+        return answer?.type === "noul" && answer.noul >= 0.5;
+      });
+
+      return { relevantMemory: picked.map((m) => m.content).join("\n\n---\n\n") };
     } catch (error) {
       console.warn(`[relevant memory snippet selector] skipped: ${String(error)}`);
       return { relevantMemory: "" };
