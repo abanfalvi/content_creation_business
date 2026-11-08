@@ -1,23 +1,21 @@
 # Publishes and then manages the platform
 
 from .tools import PublisherAgentTools
-from ..models import PUBLISHER_MODEL
-from .mcp import get_buffer_mcp
-from .utils import checkpointer
+from ...models import PUBLISHER_MODEL, track
+from ..mcp import get_buffer_mcp
+from ..utils import checkpointer
 
 import asyncio
-import opik
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
 from dotenv import load_dotenv
+from pathlib import Path
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open("src/agents/distribution_specialists/prompts/sm_writer_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 async def build_publisher_agent():
@@ -37,8 +35,7 @@ async def build_publisher_agent():
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
         )
-    opik_tracer = OpikTracer()
-    agent = track_langgraph(agent, opik_tracer)
+    agent = track(agent)
     return agent
 
 

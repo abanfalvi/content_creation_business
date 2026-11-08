@@ -3,12 +3,16 @@ from langchain_core.messages import ToolMessage
 from langchain.tools import tool, ToolRuntime
 from typing import Literal, Optional
 import uuid
+from pathlib import Path
 
 from .state import MultiAgentState
-from .book_selection_agent import book_selection_agent
-from .expert_builder_agent import expert_builder_agent
-from .script_drafter_agent import script_drafter_agent
-from .utils import get_book_path
+from ..book_selection_agent.agent import book_selection_agent
+from ..expert_builder_agent.agent import expert_builder_agent
+from ..script_drafter_agent.agent import script_drafter_agent
+from ..utils import get_book_path
+
+# content_specialists/ — each specialist keeps its prompt at <agent_name>/prompt.md
+AGENTS_DIR = Path(__file__).resolve().parents[1]
 
 
 class DirectorTools:
@@ -80,7 +84,7 @@ class DirectorTools:
         "Edit the system prompt of a specific specialist agent"
         if not runtime.state.get("system_prompt_read"):
             return "Error: you must call read_subagents_system_prompt before editing. Call it now."
-        path = f"src/agents/content_specialists/prompts/{agent_name}_prompt.md"
+        path = AGENTS_DIR / agent_name / "prompt.md"
         with open(path, "r", encoding="utf-8") as f:
             agent_prompt = f.read()
         count = agent_prompt.count(text_to_replace)
@@ -100,7 +104,7 @@ class DirectorTools:
     @tool
     def read_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"]):
         "Read the system prompt of a specific specialist agent"
-        with open(f"src/agents/content_specialists/prompts/{agent_name}_prompt.md", "r", encoding="utf-8") as f:
+        with open(AGENTS_DIR / agent_name / "prompt.md", "r", encoding="utf-8") as f:
             agent_prompt = f.read()
         return agent_prompt
 

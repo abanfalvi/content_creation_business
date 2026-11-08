@@ -3,10 +3,14 @@ from langchain_core.messages import ToolMessage, HumanMessage
 from langchain.tools import tool, ToolRuntime
 from typing import Literal, Optional
 import uuid, base64
+from pathlib import Path
 
 from .state import MultiAgentState
-from .sm_writer_agent import get_sm_writer_agent
-from .publisher_agent import get_publisher_agent
+from ..sm_writer_agent.agent import get_sm_writer_agent
+from ..publisher_agent.agent import get_publisher_agent
+
+# distribution_specialists/ — each specialist keeps its prompt at <agent_name>/prompt.md
+AGENTS_DIR = Path(__file__).resolve().parents[1]
 
 
 class DirectorTools:
@@ -83,7 +87,7 @@ class DirectorTools:
     @tool
     def edit_subagents_system_prompt(agent_name: Literal["sm_writer_agent", "publisher_agent"], to_replace: str, replace_with: str):
         "Edit the system prompt of a specific specialist agent"
-        path = f"src/agents/distribution_specialists/prompts/{agent_name}_prompt.md"
+        path = AGENTS_DIR / agent_name / "prompt.md"
         with open(path, "r", encoding="utf-8") as f:
             agent_prompt = f.read()
         count = agent_prompt.count(to_replace)
@@ -100,7 +104,7 @@ class DirectorTools:
     @tool
     def read_subagents_system_prompt(agent_name: Literal["sm_writer_agent", "publisher_agent"]):
         "Read the system prompt of a specific specialist agent"
-        with open(f"src/agents/distribution_specialists/prompts/{agent_name}_prompt.md", "r", encoding="utf-8") as f:
+        with open(AGENTS_DIR / agent_name / "prompt.md", "r", encoding="utf-8") as f:
             agent_prompt = f.read()
         return agent_prompt
 

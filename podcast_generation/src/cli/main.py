@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import asyncio
 from typing import Optional
 
@@ -40,7 +44,7 @@ def books_search(
     thread_id: Optional[str] = typer.Option(None, help="Resume a specific book-selection thread."),
 ):
     """Find new candidate books, or expand/refine the existing shortlist."""
-    from src.agents.content_specialists.book_selection_agent import book_selection_agent
+    from src.agents.content_specialists.book_selection_agent.agent import book_selection_agent
 
     tid = resolve_thread_id(key="_global", tier="book_selection", thread_id=thread_id)
     with track_tokens(book_selection_agent, tid) as usage:
@@ -84,7 +88,7 @@ def content_run(
 ):
     """Drive the content director for one turn. Prompts for approve/reject if
     the run reaches script review."""
-    from src.agents.content_specialists.director import director_agent
+    from src.agents.content_specialists.director.agent import director_agent
 
     tid = resolve_thread_id(key=book_title, tier="content", thread_id=thread_id)
     config = {"configurable": {"thread_id": tid}}
@@ -154,7 +158,7 @@ def distribution_run(
     """Drive the distribution director (social post + publishing). Fully
     automatic — the review_post step is LLM-adjudicated, no approval prompt."""
     from src.agents.content_specialists.utils import get_book_path
-    from src.agents.distribution_specialists.director import director_agent
+    from src.agents.distribution_specialists.director.agent import director_agent
 
     path = script_path or f"data/{get_book_path(book_title)}/script.md"
     tid = resolve_thread_id(key=book_title, tier="distribution", thread_id=thread_id)

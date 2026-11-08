@@ -1,25 +1,23 @@
 # Agent that writes the text content, generates the image and edits it in Canva
 
-from .mcp import get_canva_mcp
+from ..mcp import get_canva_mcp
 from .tools import SMWriterAgentTools
-from ..models import SM_WRITER_MODEL, COMPRESSOR_MODEL
-from .utils import checkpointer
+from ...models import SM_WRITER_MODEL, COMPRESSOR_MODEL, track
+from ..utils import checkpointer
 from .state import SMWriterState
 
 import asyncio
-import opik
 from langchain.agents import create_agent
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents.middleware import FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 from dotenv import load_dotenv
+from pathlib import Path
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open("src/agents/distribution_specialists/prompts/sm_writer_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 compressor_model = ChatOpenRouter(
@@ -56,8 +54,7 @@ async def build_sm_writer_agent():
             )
         ]
         )
-    opik_tracer = OpikTracer()
-    agent = track_langgraph(agent, opik_tracer)
+    agent = track(agent)
     return agent
 
 

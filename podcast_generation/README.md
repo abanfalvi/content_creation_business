@@ -33,8 +33,8 @@ that agent's context on future runs via `FilesystemFileSearchMiddleware` over `s
 ```
 src/
   agents/
-    content_specialists/       book selection, expert builder, script drafter, director
-    production_specialists/    TTS generation, audio engineer, director
+    content_specialists/       book selection, expert builder, script planner, script drafter, director
+    production_specialists/    TTS workflow, audio engineer, lessons-learned extractor
     distribution_specialists/  social writer, publisher, director
     models.py                  which OpenRouter model each agent runs on
   cli/                         Typer CLI + interactive REPL
@@ -47,6 +47,23 @@ checkpoints/                   LangGraph SQLite checkpoints (content / productio
 podcast_books_db/              Chroma vector store for ingested books
 assets/PROJECT.md              design notes: agent architecture, memory strategy, roadmap
 ```
+
+### Agent folders
+
+Every agent lives in its own folder, and everything specific to it sits next to it:
+
+```
+<group>/<agent_name>/
+  agent.py          builds the agent (model, middleware, wiring) and exports it
+  prompt.md         system prompt (directors can read/edit it at runtime)
+  tools.py          the agent's tools
+  state.py          its LangGraph state schema
+  step_prompts.py   (directors only) per-step prompts swapped in by `active_agent`
+```
+
+Things used by several agents in a group stay at the group level: `utils.py` (checkpointer,
+`get_book_path`), `shared_tools.py` (content), `voice_tools.py` + workflow `state.py` (production),
+`mcp.py` (distribution). Skill files stay under `src/skills/`.
 
 ## Setup
 

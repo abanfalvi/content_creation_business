@@ -76,7 +76,7 @@ vector_store = Chroma(
 )
 
 # It currently produces a url for zip file
-def parse_pdf(filepath, book_name, page_ranges):
+def parse_pdf(filepath: str, book_name: str, page_ranges: str):
     token = os.getenv("MINERU_API_KEY", "")
     url = "https://mineru.net/api/v4/file-urls/batch"
     header = {

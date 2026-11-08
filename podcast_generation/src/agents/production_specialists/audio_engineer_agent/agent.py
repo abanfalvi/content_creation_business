@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-import opik
+from pathlib import Path
 from typing import Callable
 
 from langchain_openrouter import ChatOpenRouter
@@ -8,21 +8,19 @@ from langchain.agents.middleware import FilesystemFileSearchMiddleware, ModelFal
 
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import AudioEngineerTools
 from .state import AudioEngineerState
-from ..models import AUDIO_ENGINEER_MODEL
-from .utils import checkpointer
+from ...models import AUDIO_ENGINEER_MODEL, track
+from ..utils import checkpointer
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open(r"src\agents\production_specialists\prompts\audio_engineer_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
-with open(r"src\agents\production_specialists\prompts\audio_engineer_review_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "review_prompt.md", "r", encoding="utf-8") as f:
     REVIEW_PROMPT = f.read()
 
 audio_engineer_model = ChatOpenRouter(
@@ -113,5 +111,4 @@ audio_engineer = create_agent(
     # response_format=RubricScores
 )
 
-opik_tracer = OpikTracer()
-audio_engineer_agent = track_langgraph(audio_engineer, opik_tracer)
+audio_engineer_agent = track(audio_engineer)

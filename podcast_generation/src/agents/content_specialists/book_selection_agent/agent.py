@@ -1,25 +1,22 @@
 from dotenv import load_dotenv
-import opik
+from pathlib import Path
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 
 from langchain.agents.middleware import ModelFallbackMiddleware
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import BookSelectionTools
-from .prompts import BookSelectionPrompt
 from .state import BookSelectionState
-from ..models import BOOK_SELECTION_MODEL
-from .utils import checkpointer
+from ...models import BOOK_SELECTION_MODEL, track
+from ..utils import checkpointer
 
 load_dotenv()
 
-with open("src/agents/content_specialists/prompts/book_selection_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 book_selection_model = ChatOpenRouter(
     model=BOOK_SELECTION_MODEL,
@@ -51,5 +48,4 @@ book_selection_agent = create_agent(
     checkpointer=checkpointer,
 )
 
-opik_tracer = OpikTracer()
-book_selection_agent = track_langgraph(book_selection_agent, opik_tracer)
+book_selection_agent = track(book_selection_agent, False)

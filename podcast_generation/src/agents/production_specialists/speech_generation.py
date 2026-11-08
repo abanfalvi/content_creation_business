@@ -1,26 +1,26 @@
 
 from dotenv import load_dotenv
-import opik, os
+import os
 import re
 from pydub import AudioSegment
 import base64
 from typing import Dict
 
-from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
-from langchain_openrouter import ChatOpenRouter
 
 from langgraph.types import interrupt
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
-from .tools import VoiceAgentsTools, LessonsLearnedExtracterAgentTools
-from .state import VoiceWorkflowState, RubricScores, LLExtractorState
-from .audio_engineer_agent import audio_engineer_agent
-from ...memory.memory_store import shared_store
-from ..models import LL_EXTRACTOR_AGENT
+from .voice_tools import VoiceAgentsTools
+from .state import VoiceWorkflowState
+from .audio_engineer_agent.state import RubricScores
+from .audio_engineer_agent.agent import audio_engineer_agent
+from .lessons_learned_extractor.tools import LessonsLearnedExtracterAgentTools
+from .lessons_learned_extractor.agent import build_lessons_learned_extractor_agent, build_extraction_request
+from src.memory.memory_store import shared_store
+from ..models import track
 from .utils import checkpointer
 from ..content_specialists.utils import get_book_path
 
@@ -28,8 +28,6 @@ from langgraph.graph import StateGraph, START, END
 
 load_dotenv()
 
-opik_tracer = OpikTracer()
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
 def parse_turns(script_path: str) -> list[tuple[str, str]]:
     with open(script_path, encoding="utf-8") as f:
@@ -110,26 +108,10 @@ def human_review_node(state: VoiceWorkflowState) -> dict:
 def lessons_learned_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
 
-    ll_extracter_agent = create_agent(
-        model=ChatOpenRouter(model=LL_EXTRACTOR_AGENT, temperature=.2),
-        tools=[LessonsLearnedExtracterAgentTools.save_learnable_traces],
-        state_schema=LLExtractorState,
-        store=store
-    )
+    ll_extracter_agent = build_lessons_learned_extractor_agent(store)
 
     traces = LessonsLearnedExtracterAgentTools.extract_learnable_traces(thread_id=audio_engineer_thread_id, agent=audio_engineer_agent)
-    result = ll_extracter_agent.invoke({"messages": [("user", f"""
-                Analyse the following traces by collecting the steps that were successully
-                taken to solve the next part of the question AND should serve as a reinforcing
-                example of how this question/issue should be solved. 
-                In addition, make sure to collect those steps where the agent had troubles/failed
-                to successfully, or smoothly, solve the part of the question/issue at hand AND should
-                serve as a learning trace of what should be avoided in the future. 
-    
-                Traces collected for this run: {traces}
-
-                Followingly, return back a summary of the traces you saved to the user.
-    """)]})
+    result = ll_extracter_agent.invoke({"messages": [("user", build_extraction_request(traces))]})
 
     return {"lessons_learned": result["messages"][-1].content}
 
@@ -150,5 +132,5 @@ builder.add_edge("lessons_learned_path", END)
 
 voice_gen_graph = builder.compile(checkpointer, store=shared_store)
 
-speech_gen_workflow = track_langgraph(voice_gen_graph, opik_tracer)
+speech_gen_workflow = track(voice_gen_graph)
 

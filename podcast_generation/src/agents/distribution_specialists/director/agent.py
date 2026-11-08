@@ -1,6 +1,6 @@
 
 from dotenv import load_dotenv
-import opik
+from pathlib import Path
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, FilesystemFileSearchMiddleware
@@ -8,79 +8,56 @@ from langchain_openrouter import ChatOpenRouter
 
 from typing import Callable
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
-from .director_tools import DirectorTools
-from .prompts import ContentDirectorPrompt
+from .tools import DirectorTools
+from ..publisher_agent.agent import get_publisher_agent
+from ..sm_writer_agent.agent import get_sm_writer_agent
+from .step_prompts import DistributionDirectorPrompt
 from .state import MultiAgentState
-from .book_selection_agent import book_selection_agent
-from .expert_builder_agent import expert_builder_agent
-from .script_drafter_agent import script_drafter_agent
-from ..models import DIRECTOR_MODEL
-from ...memory.memory_store import shared_store
-from .utils import checkpointer
+from ...models import DISTRIBUTION_DIRECTOR_MODEL, track
+from ..utils import checkpointer
+from src.memory.memory_store import shared_store
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open("src/agents/content_specialists/prompts/director_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 director_model = ChatOpenRouter(
-    model=DIRECTOR_MODEL,
+    model=DISTRIBUTION_DIRECTOR_MODEL,
     temperature=.1
-)
-
-content_skills_search = FilesystemFileSearchMiddleware(
-    root_path="src/skills/content_skills",
-    use_ripgrep=True,
 )
 
 # Step configuration: maps step name to (prompt, tools, required_state)
 STEP_CONFIG = {
-    "call_book_selection_agent": {
+    "call_sm_writer_agent": {
         "prompt": "",
-        "tools": [DirectorTools.call_book_selection_agent],
+        "tools": [DirectorTools.call_sm_writer_agent],
         "requires": [],
     },
-    "call_expert_builder_agent": {
+    "call_publisher_agent": {
         "prompt": "",
-        "tools": [DirectorTools.call_expert_builder_agent],
-        "requires": [],
-    },
-    "call_script_drafter_agent": {
-        "prompt": "",
-        "tools": [DirectorTools.call_script_drafter_agent],
+        "tools": [DirectorTools.call_publisher_agent],
         "requires": [],
     },
     # set current step/ active agent to this, when needed, during invoke method
-    "edit_prompts_skills": {
+    "edit_prompts": {
         "prompt": "",
-        "tools": [DirectorTools.edit_subagents_system_prompt, DirectorTools.read_subagents_system_prompt, DirectorTools.update_specialist_skills, *content_skills_search.tools],
+        "tools": [DirectorTools.edit_subagents_system_prompt, DirectorTools.read_subagents_system_prompt, DirectorTools.update_specialist_skills],
         "requires": [],
     },
-    "review_expert_profile": {
-        "prompt": ContentDirectorPrompt.REVIEW_EXPERT_PROFILE,
-        "tools": [DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
-        "requires": [],
-    },
-    "human_review": {
-        "prompt": ContentDirectorPrompt.SUBMIT_FOR_REVIEW,
-        "tools": [DirectorTools.human_review],
-        "requires": [],
+    "review_post": {
+        "prompt": DistributionDirectorPrompt.REVIEW_POST,
+        "tools": [DirectorTools.call_sm_writer_agent, DirectorTools.call_publisher_agent, DirectorTools.get_review_materials],
+        "requires": ["caption_path", "image_post_path"],
     },
     "get_lessons_learned": {
         "prompt": "",
         "tools": [DirectorTools.save_learnable_traces],
         "requires": [],
     },
-    "full_flexibility": {
-        "prompt": "",
-        "tools": [DirectorTools.call_book_selection_agent, DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
-        "requires": [],
-    },
-    
+
 }
 
 def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str | None = None):
@@ -136,9 +113,8 @@ def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str |
 # Maps the agent_name used by save_learnable_traces to (its own compiled
 # graph, the thread-id suffix director_tools.py invokes it with).
 SUB_AGENTS = {
-    "book_selection_agent": (book_selection_agent, "book_selection"),
-    "expert_builder_agent": (expert_builder_agent, "expert_builder"),
-    "script_drafter_agent": (script_drafter_agent, "script_drafter"),
+    "sm_writer_agent": (get_sm_writer_agent(), "sm_writer_agent"),
+    "publisher_agent": (get_publisher_agent(), "publisher_agent"),
 }
 
 
@@ -148,6 +124,7 @@ def extract_learnable_traces(thread_id: str, agent):
         trace += _extract_message_trace(sub_agent, f"{thread_id}::{thread_suffix}", "agent_name", agent_name)
     return trace
 
+
 @wrap_model_call
 def apply_step_config(
     request: ModelRequest,
@@ -155,7 +132,6 @@ def apply_step_config(
 ) -> ModelResponse:
     """Configure agent behavior based on the current step."""
     active_agent = request.state.get("active_agent")
-    print("Active agent is", active_agent)
     thread_id = request.runtime.execution_info.thread_id
 
     # Look up step configuration
@@ -165,6 +141,7 @@ def apply_step_config(
     for key in stage_config["requires"]:
         if request.state.get(key) is None:
             raise ValueError(f"{key} must be set before reaching {active_agent}")
+
     if active_agent == "get_lessons_learned":
         traces = extract_learnable_traces(thread_id, director_agent)
         step_prompt = f"""
@@ -176,21 +153,20 @@ def apply_step_config(
             serve as a learning trace of what should be avoided in the future.
 
             When you call save_learnable_traces, write every trace as a universal
-            lesson that generalizes to producing an episode from ANY book, not
-            just the one processed in this run. Strip out the specific book
-            title, author, character names, or any other content unique to
-            this run, and keep only the transferable pattern in how the agent
+            lesson that generalizes to distributing ANY episode, for ANY book,
+            not just the one processed in this run. Strip out the specific book
+            title, episode content, author, or any other content unique to this
+            run, and keep only the transferable pattern in how the agent
             reasoned, chose tools, or handled the situation.
 
             Traces collected for this run: {traces}
-        """
 
+        """
     else:
         step_prompt = stage_config["prompt"].format(
             **request.state
             )
 
-    # Inject system prompt and step-specific tools
     if step_prompt:
         request = request.override(
             system_prompt=step_prompt,
@@ -204,14 +180,13 @@ def apply_step_config(
     return handler(request)
 
 all_tools = [
-    DirectorTools.call_book_selection_agent,
-    DirectorTools.call_expert_builder_agent,
-    DirectorTools.call_script_drafter_agent,
+    DirectorTools.call_publisher_agent,
+    DirectorTools.call_sm_writer_agent,
     DirectorTools.read_subagents_system_prompt,
     DirectorTools.edit_subagents_system_prompt,
     DirectorTools.save_learnable_traces,
     DirectorTools.update_specialist_skills,
-    DirectorTools.human_review,
+    DirectorTools.get_review_materials
 ]
 
 director_agent = create_agent(
@@ -221,11 +196,13 @@ director_agent = create_agent(
     state_schema=MultiAgentState,
     middleware=[
         apply_step_config,
-        content_skills_search,
+        FilesystemFileSearchMiddleware(
+            root_path="src/skills/distribution_skills",
+            use_ripgrep=True,
+        ),
     ],
     checkpointer=checkpointer,
     store=shared_store
 )
 
-opik_tracer = OpikTracer()
-director_agent = track_langgraph(director_agent, opik_tracer)
+director_agent = track(director_agent)

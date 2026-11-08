@@ -1,23 +1,22 @@
 from dotenv import load_dotenv
-import opik
+from pathlib import Path
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 
 from langchain.agents.middleware import FilesystemFileSearchMiddleware, SummarizationMiddleware, ModelFallbackMiddleware
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
 from .tools import ExpertProfileTools
+from ..shared_tools import SharedContentTools
 from .state import ExpertBuilderState
-from ..models import EXPERT_BUILDER_MODEL, COMPRESSOR_MODEL
-from .utils import checkpointer
+from ...models import EXPERT_BUILDER_MODEL, COMPRESSOR_MODEL, track
+from ..utils import checkpointer
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open("src/agents/content_specialists/prompts/expert_builder_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 expert_builder_model = ChatOpenRouter(
@@ -35,7 +34,7 @@ compressor_model = ChatOpenRouter(
 all_tools = [
     ExpertProfileTools.edit_persona,
     ExpertProfileTools.read_persona,
-    ExpertProfileTools.retrieve_info,
+    SharedContentTools.retrieve_info,
     ExpertProfileTools.append_persona,
     ExpertProfileTools.read_book_content,
     ExpertProfileTools.load_skill_content,
@@ -61,5 +60,4 @@ expert_builder_agent = create_agent(
     checkpointer=checkpointer,
 )
 
-opik_tracer = OpikTracer()
-expert_builder_agent = track_langgraph(expert_builder_agent, opik_tracer)
+expert_builder_agent = track(expert_builder_agent)

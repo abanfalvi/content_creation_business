@@ -1,23 +1,22 @@
 from dotenv import load_dotenv
-import opik
+from pathlib import Path
 
 from langchain_openrouter import ChatOpenRouter
 from langchain.agents import create_agent
 
 from langchain.agents.middleware import SummarizationMiddleware, FilesystemFileSearchMiddleware, ModelFallbackMiddleware
 
-from opik.integrations.langchain import OpikTracer, track_langgraph
 
-from .tools import ScriptDrafterTools, ExpertProfileTools
+from .tools import ScriptDrafterTools
+from ..shared_tools import SharedContentTools
 from .state import ScriptDrafterState
-from ..models import SCRIPT_DRAFTER_MODEL, COMPRESSOR_MODEL
-from .utils import checkpointer
+from ...models import SCRIPT_DRAFTER_MODEL, COMPRESSOR_MODEL, track
+from ..utils import checkpointer
 
 load_dotenv()
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
 
-with open("src/agents/content_specialists/prompts/script_drafter_agent_prompt.md", "r", encoding="utf-8") as f:
+with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 script_drafter_model = ChatOpenRouter(
@@ -37,7 +36,7 @@ all_tools = [
     ScriptDrafterTools.edit_script,
     ScriptDrafterTools.read_script,
     ScriptDrafterTools.read_personas,
-    ExpertProfileTools.retrieve_info,
+    SharedContentTools.retrieve_info,
     ScriptDrafterTools.read_book_content,
     ScriptDrafterTools.load_available_skills,
     ScriptDrafterTools.load_skill_content
@@ -62,5 +61,4 @@ script_drafter_agent = create_agent(
     checkpointer=checkpointer,
 )
 
-opik_tracer = OpikTracer()
-script_drafter_agent = track_langgraph(script_drafter_agent, opik_tracer)
+script_drafter_agent = track(script_drafter_agent)
