@@ -35,6 +35,7 @@ from ..voice_tools import VoiceAgentsTools
 class AudioEngineerTools:
 
     @tool
+    @staticmethod
     def record_rubric_scores(
         loudness_consistency: int,
         noise_clarity: int,
@@ -63,6 +64,7 @@ class AudioEngineerTools:
         })
 
     @tool
+    @staticmethod
     def listen_audio(input_path: str, runtime: ToolRuntime) -> Command:
         "Listen to the current version of the podcast clip"
         with open(input_path, "rb") as f:
@@ -84,6 +86,7 @@ class AudioEngineerTools:
         })
 
     @tool
+    @staticmethod
     def generate_audio(script: str, host_or_expert: Literal["Host", "Expert"], output_path: str):
         "Provide the section from the script that should be regenerated because it could not be adjusted by any of the tools"
         if host_or_expert == "Host":
@@ -94,6 +97,7 @@ class AudioEngineerTools:
         return new_audio_path
 
     @tool
+    @staticmethod
     def trim_audio(input_path: str, start_ms: int, end_ms: int, output_path: str) -> str:
         """Cut a segment of audio between start_ms and end_ms and save it."""
         audio = AudioSegment.from_file(input_path)
@@ -101,6 +105,7 @@ class AudioEngineerTools:
         return output_path
 
     @tool
+    @staticmethod
     def adjust_volume(input_path: str, change_db: float, output_path: str) -> str:
         """Increase (+) or decrease (-) volume by change_db decibels."""
         audio = AudioSegment.from_file(input_path)
@@ -108,6 +113,7 @@ class AudioEngineerTools:
         return output_path
 
     @tool
+    @staticmethod
     def fade(input_path: str, fade_in_ms: int, fade_out_ms: int, output_path: str) -> str:
         """Apply fade-in and fade-out to the start/end of a clip."""
         audio = AudioSegment.from_file(input_path)
@@ -116,6 +122,7 @@ class AudioEngineerTools:
         return output_path
 
     @tool
+    @staticmethod
     def trim_silence(input_path: str, silence_thresh_db: int, min_silence_len_ms: int, output_path: str) -> str:
         """Remove leading/trailing silence below silence_thresh_db (e.g. -40)."""
         audio = AudioSegment.from_file(input_path)
@@ -125,6 +132,7 @@ class AudioEngineerTools:
         return output_path
 
     @tool
+    @staticmethod
     def overlay_audio(base_path: str, overlay_path: str, position_ms: int, gain_db: float, output_path: str) -> str:
         """Mix a second track (e.g. intro music) onto the base at position_ms, at gain_db relative volume."""
         base = AudioSegment.from_file(base_path)
@@ -133,12 +141,14 @@ class AudioEngineerTools:
         return output_path
 
     @tool
+    @staticmethod
     def load_skill_content(skill_name: str) -> str:
         "Load the content of the specific skill"
         post = frontmatter.load(f"skills/production_skills/{skill_name}.md")
         return post.content
 
     @tool
+    @staticmethod
     def load_available_skills() -> List[dict] | str:
         "Load the name and descriptions of the available skills"
         os.makedirs("src/skills/production_skills", exist_ok=True)

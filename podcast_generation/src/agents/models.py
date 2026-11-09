@@ -38,7 +38,7 @@ DIGEST_MODEL = "z-ai/glm-5.3-flash"
 DIRECTOR_MODEL = "deepseek/deepseek-v4-flash-0731"
 
 # Production specialists
-AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.5" # google/gemini-2.5-flash-lite
+AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.6" # google/gemini-2.5-flash-lite
 
 # Distribution specialists
 SM_WRITER_MODEL = "minimax/minimax-m3.1-flash"

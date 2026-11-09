@@ -133,8 +133,7 @@ don't pad or repeat yourself to fill space.
 - Where a line's delivery isn't obvious from the dialogue, you may prefix
   it with a short bracketed emotional tag for the Fish Audio TTS model
   (e.g. "[laughs]", "[curious]", "[thoughtful]", "[skeptical]"). Use them
-  sparingly, since overusing them makes the audio sound stilted, and always
-  in the same style.
+  frequently.
 - Never leave a turn half-finished at the end of an addition.
 
 ## How to work on the file

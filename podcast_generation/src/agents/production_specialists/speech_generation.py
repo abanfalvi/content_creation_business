@@ -55,12 +55,13 @@ def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, unde
     with open(script, "r") as f:
         script_text = f.read()
 
-    model_instruction = f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. \n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
+    model_instruction = f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. The following script was used:\n{script_text}\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
     if user_feedback:
         model_instruction += f"\n\n The user did not approve the current version of the audio. Review the audio while taking into account their feedback: \n {user_feedback}"
 
     message = HumanMessage(content=[
         {"type": "text", "text": model_instruction},
+        {"type": "audio", "base64": audio_b64, "mime_type": "audio/mp3"},
     ])
     result = audio_engineer_agent.invoke({"messages": [message], "active_step": "edit_audio"}, config={"configurable": {"thread_id": thread_id}})
 
