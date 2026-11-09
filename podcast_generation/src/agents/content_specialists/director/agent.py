@@ -35,7 +35,12 @@ content_skills_search = FilesystemFileSearchMiddleware(
     use_ripgrep=True,
 )
 
-# Step configuration: maps step name to (prompt, tools, required_state)
+# Step configuration: maps each step name (the `active_agent` state value) to
+#   prompt   - system prompt override for the step; "" keeps the director's base prompt
+#   tools    - the only tools the model can see during the step
+#   requires - state keys that must be set before the step may run
+# Single-tool steps are for forcing one stage (the CLI's --step); the multi-tool
+# steps (review_expert_profile, full_flexibility) let the director pick the stage.
 STEP_CONFIG = {
     "call_book_selection_agent": {
         "prompt": "",
@@ -78,8 +83,10 @@ STEP_CONFIG = {
         "tools": [DirectorTools.call_book_selection_agent, DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
         "requires": [],
     },
-    
 }
+
+# Used when no step is set (or an unknown one is), instead of crashing the run.
+DEFAULT_STEP = "full_flexibility"
 
 def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str | None = None):
     """Walk one graph's own checkpoint history, diffing `messages` between
@@ -153,6 +160,9 @@ def apply_step_config(
 ) -> ModelResponse:
     """Configure agent behavior based on the current step."""
     active_agent = request.state.get("active_agent")
+    if active_agent not in STEP_CONFIG:
+        print(f"Active agent {active_agent!r} is not a known step, falling back to {DEFAULT_STEP!r}")
+        active_agent = DEFAULT_STEP
     print("Active agent is", active_agent)
     thread_id = request.runtime.execution_info.thread_id
 

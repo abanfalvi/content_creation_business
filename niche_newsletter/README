@@ -1,1 +1,133 @@
-Under Development...
+# Niche Newsletter
+
+> **Status: under development.** This document describes how the system is designed to work today. Details will change.
+
+A multi-agent system that runs the content operation of a niche AI newsletter aimed at non-technical readers. It handles the whole loop: deciding what to cover, researching it, writing the issue as a draft, promoting it on social media, finding new audience channels, and learning from how past content performed.
+
+A human stays in charge of the decisions that matter. The system never publishes the newsletter itself. It stops at a draft, and a person reviews and sends it.
+
+## The big picture
+
+The system is organised like a small company. One agent talks to the human, and everything else is a department that receives written assignments.
+
+```
+                              You (TUI)
+                                  │
+                           ┌──────▼───────┐
+                           │ Orchestrator │ ── analytics, strategy notes, memory, scheduling
+                           └──────┬───────┘
+        ┌─────────────────────────┼──────────────────────────┐
+        │                         │                          │
+┌───────▼────────┐      ┌─────────▼─────────┐      ┌─────────▼────────┐
+│ Signal editor  │      │   Curriculum      │      │  Distribution    │
+│ department     │      │   department      │      │  department      │
+│ (newsletter    │      │ (digital products)│      │ (social + leads) │
+│  issues)       │      │                   │      │                  │
+└────────────────┘      └───────────────────┘      └──────────────────┘
+```
+
+The source folders map to this: `src/orchestrator`, `src/signal-editor-dep`, `src/curriculum-dep`, `src/distribution-dep`, `src/memory_agent`.
+
+## The orchestrator
+
+The orchestrator is the only agent that talks to a person. Its job has three parts:
+
+1. **Shape the content strategy with the user.** Planning is a conversation. It asks about direction, checks what has already been covered, and proposes options. It doesn't pick topics unilaterally.
+2. **Decide what work needs doing.**
+3. **Delegate that work with a clear brief.** The departments never see the conversation, only the handoff, so the orchestrator writes each handoff to stand on its own.
+
+It also has these responsibilities:
+
+- **Strategy and plans.** It owns a folder of management notes. `content_strategy/` holds long-lived direction, one doc per theme (prompt engineering, automation, AI news roundup, and so on). `content_plans/` holds time-bound plans such as series and calendars. The relevant theme doc is injected into its prompt when a conversation touches that theme, so it doesn't have to go looking for it.
+- **Analytics.** It has read-only access to newsletter performance: per-post stats, publication-wide stats, website traffic, automation and referral numbers, and AI-crawler traffic. Before recommending more or less coverage of a theme, it checks how that theme actually performed.
+- **Light research.** It can search the web to see what's timely while planning. This is not the newsletter's real research, which is delegated.
+- **Skills.** Step-by-step playbooks it loads when relevant: trend research, performance review, prompt-engineering posts, publishing to social, and scheduling recurring runs.
+- **Scheduling.** It can schedule a prompt to run later, once, daily or weekly, in an unattended session. An example is a weekly AI news roundup.
+- **Long-term memory.** It hands lessons, preferences and decisions to a dedicated memory agent.
+
+### The publish checkpoint
+
+The orchestrator is the last checkpoint before anything goes public. Social posting and outreach need an explicit go-ahead from the user on a concrete plan: which channels, what goes out, and when. A vague "should I go ahead?" doesn't count. Scheduled runs follow the same rule, so they can prepare drafts but can't publish unless the user already agreed to that exact plan.
+
+## Signal editor department: producing a newsletter issue
+
+An **editor manager** coordinates four specialists. They all work on one topic, identified by a stable `researchTopic` key, and share a notes file for that topic. The pipeline is:
+
+```
+research → relevance filter → use-case writer → editor → review
+```
+
+| Stage | What it does |
+|---|---|
+| **Research agent** | Searches recent AI news, papers and releases, and looks for how each finding can actually be used. Every finding goes into a shared scratch pad with what happened, why it matters, how to use it, and a source URL. It can check notes left by earlier topics so it doesn't redo work. |
+| **Relevance filter agent** | Scores each finding out of 8 on being sourced, on-topic, actionable and novel. It cuts weak ones, rewrites borderline ones, researches gaps, and prepends a short YAML index. An unsourced finding is always cut. |
+| **Use-case writer agent** | Turns each surviving finding into a how-to a reader could follow today: numbered, concrete steps, each grounded in something it actually checked, such as a transcript or an extracted page. If nothing shows a claimed workflow works end to end, it says so instead of inventing steps. |
+| **Editor agent** | Assembles the issue as a draft with a real structure and visuals that explain something: charts, generated images, and diagrams or infographics built in a sandbox. Issues are written in **Spanish**. It never publishes. |
+
+The editor manager doesn't do any of this work itself:
+
+- **A task counts as done only when the specialist confirms it.** An empty reply, an error or a "here's what I plan to do" doesn't count. If a handoff comes back unconfirmed, the manager sends one targeted follow-up and then reports the failure instead of assuming success.
+- **It reviews the real draft.** It opens the saved draft and scores it against a rubric covering structure, visual relevance, groundedness and Spanish language. It then either approves it or sends the editor back with specific fixes. If a revision doesn't fix the same issue, it says so and stops looping.
+- **It owns the referral program** directly: rewards, milestones and settings. The orchestrator only reads referral performance and requests changes.
+
+Two topics skip parts of the pipeline. A news roundup skips the use-case writer. A prompt-engineering post skips research: the orchestrator drafts an outline with the user and hands it straight to the editor.
+
+## Curriculum department: digital products
+
+A **digital product creation agent** turns a content brief into a PDF lead magnet, guide or checklist. It builds the document from a house design kit, which covers cover pages, content pages, callouts, steps, checklists and a closing call to action. It also generates illustrative images where they help. The document is rendered in an isolated sandbox. Before anything is hosted, it pauses for human review through the orchestrator. A rejection comes with concrete feedback, and the agent has to fix what was flagged and re-render.
+
+## Distribution department: growth
+
+A **distribution manager** coordinates two specialists and also does one job itself.
+
+- **Social media agent.** It repackages finished content into on-brand posts. It starts from the newsletter's existing Canva design, writes copy for a feed, picks the channel and schedule, and reads the post back after publishing to verify it. When it tries to publish, execution pauses and the real post (copy, channel, schedule and image) goes to the manager. The manager scores it for brand consistency and either approves it or sends back specific feedback.
+- **User outreach agent.** It searches Instagram by niche keywords for large accounts that already reach the target audience and logs them as leads in Notion. It only finds and logs. It never contacts anyone.
+- **Trend research (done by the manager).** It scrapes and transcribes trending TikTok videos and Instagram reels to see which topics, hooks and formats are working. This is read-only and feeds back into strategy.
+
+## Memory
+
+Two layers keep the system from starting from zero each time:
+
+- **Management notes:** the strategy and plan docs described above. They are the editorial source of truth.
+- **Long-term memory:** a folder managed by a single memory agent. It stores user preferences, decisions and their reasoning, lessons from past runs, and audience facts. The agent organises the folder as a searchable tree. Siblings are distinguishable by name, a folder covers exactly its name, and related facts sit close together. It deduplicates and removes stale entries so nothing contradictory is left behind.
+
+## Shared design ideas
+
+- **Structured handoffs.** Managers delegate with the same shape every time: `task_id`, `objectives`, `constraints` and `deliverables`.
+- **Files as the communication channel.** Specialists write their real output to files (scratch pads, how-tos, drafts), not into their replies, because the next agent only reads the file.
+- **Human-in-the-loop at the risky points.** There are gates before social posts, before documents are hosted, and before the newsletter is sent.
+- **Per-agent models.** Each agent runs on its own model, chosen for its job and cost, through OpenRouter.
+- **Skills.** Agents can read short playbooks (`SKILL.md` files) listed by name and description in their prompts.
+- **Checkpointed state.** Each department keeps its conversation state in a local SQLite checkpoint, so long runs can resume.
+- **End-of-run verification.** A check nudges an agent that stops without reporting what it did.
+- **Cost tracking.** The running OpenRouter spend is tracked per process, sub-agents included.
+- **Live steering.** The TUI lets you type guidance to the orchestrator or a running sub-agent mid-run.
+
+## Scheduled and unattended runs
+
+A scheduled run starts the orchestrator headlessly from a saved prompt, with nobody there to answer questions. Schedules and state live in a private state repository that is synced between your machine and a GitHub runner, so work done in either place is visible in the other.
+
+## Self-improvement
+
+The system is designed to get better over time without changing its core code.
+
+- **Tracing and judging.** Runs are traced in Opik. LLM judges score specialist sessions, and poorly scored transcripts are kept as test cases for that agent.
+- **Skill optimizer.** Once an agent has collected enough bad cases, a skill-optimizer agent reads them and writes or edits that agent's `SKILL.md` files. It learns from recurring problems and ignores one-offs, outages and case-specific details. New skills only go live if a regression suite approves them, and they arrive as a pull request.
+- **Evaluation harness.** `eval/` runs each agent and the whole system against defined problems, scoring them with assertion judges and tool-use policies. In eval mode, tools that would publish, send email or modify real content are replaced with recorders, so evaluations have no real-world side effects.
+
+## Repository map
+
+| Path | Contents |
+|---|---|
+| `src/orchestrator/` | The orchestrator, its prompt, tools and skills |
+| `src/signal-editor-dep/` | Editor manager, research, filter, use-case writer and editor agents |
+| `src/curriculum-dep/` | Digital product creation agent and PDF design kit |
+| `src/distribution-dep/` | Distribution manager, social media agent, outreach agent |
+| `src/memory_agent/` | The memory keeper |
+| `src/shared/` | Integrations (beehiiv, Notion, Canva, Dropbox), state sync, steering, cost tracking, eval guard |
+| `src/tui/` | The terminal interface |
+| `src/skills/` | Live per-agent skill files, updated by the optimizer |
+| `management_notes/` | Content strategy docs and content plans |
+| `memories/` | Long-term memory store |
+| `self_evolution/` | Skill optimization pipeline |
+| `eval/` | Evaluation harness and problem sets |

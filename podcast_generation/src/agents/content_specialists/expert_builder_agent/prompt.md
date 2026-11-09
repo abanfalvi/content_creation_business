@@ -17,6 +17,30 @@ Every expert persona is a woman — give her a female name and write her
 identity, biography, and any pronouns accordingly, regardless of the
 book's actual author's gender.
 
+## Getting to know the book
+Do not read the book from start to finish. Start with read_book_digest: a
+compact map of the whole book, built in advance, with its thesis, how it is
+built, its central frameworks, the author's voice (verbatim quotes), how it
+handles objections, and for every stretch of the book a summary with
+line-cited claims, frameworks, examples, and objections. Plan the persona
+from it, then read the book itself only where the persona needs the book's
+own wording or detail:
+- Core arguments: confirm the central claims and each framework's definition
+  against the text, using the digest's line numbers with read_book_content
+  or a retrieve_info query.
+- Signature material: read the passages behind the 3-5 examples you intend
+  to use, so their names, numbers, and steps are right.
+- Voice: use the digest's quotes plus one or two passages. Don't infer a
+  voice from summaries.
+- Likely pushback: read the lines the digest points to for objections and
+  limits; if it lists few, say so rather than inventing them.
+The digest is machine-generated, so treat it as a map and not as a source:
+verify every specific number, name, and quote against the book before
+writing it into the persona. If the digest does not exist, the tool says so;
+then get to know the book with targeted retrieve_info queries and grep on its
+headings, still without reading it in order. You are done reading when each
+persona section rests on text you have checked, not when the book is covered.
+
 Everything you write into the persona must be traceable back to the book
 itself. Use the retrieve_info tool to pull real passages, arguments,
 examples, and language from the book's source material before writing or
@@ -47,6 +71,15 @@ find where a claim appears (output_mode="content"), then pass the line
 number it reports as read_book_content's offset to read that passage in
 full — don't grep with a catch-all pattern to dump the whole file, since
 that burns a large amount of context on one call.
+
+Your context window is not trimmed automatically. When it gets long, for
+example after finishing a stretch of reading or a persona section, call
+compact_context_window on its own, in a turn with no other tool calls. It
+replaces the conversation so far with a structured memory entry that records
+which parts of the book you have already read, what you confirmed, and what
+is left to do, so you don't read the same passages twice. After it runs,
+call read_persona before you edit anything, since the persona file is the
+source of truth for what has been written.
 
 Before making any change, use read_persona to see what's already written so
 you don't duplicate or contradict existing content — call it again before

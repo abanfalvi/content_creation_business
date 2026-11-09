@@ -64,10 +64,24 @@ def books_preprocess(
     end_page: int = typer.Option(..., help="Last page to parse from the source PDF."),
 ):
     """Parse, chunk, and embed a book into the local vector DB."""
-    from src.vector_db import preprocessing_pipeline
+    from src.book_preprocessing.pipeline import preprocessing_pipeline
 
     with console.status("[bold cyan]Parsing, chunking, and embedding...[/bold cyan]", spinner="dots"):
         result = asyncio.run(preprocessing_pipeline(book_genre=book_genre, book_name=book_name, end_page=end_page))
+    typer.echo(result)
+
+
+@books_app.command("digest")
+def books_digest(
+    book_title: str = typer.Option(..., help="Book title, as listed in src/book_list.json."),
+    force: bool = typer.Option(False, "--force", help="Regenerate even if the digest matches the current book file."),
+):
+    """Build data/<slug>/book_digest.md for an already preprocessed book: a compact, line-cited
+    map the expert builder and planner read first, so they don't have to read the whole book."""
+    from src.book_preprocessing.digest import digest_book
+
+    with console.status("[bold cyan]Digesting the book...[/bold cyan]", spinner="dots"):
+        result = asyncio.run(digest_book(book_title, force=force))
     typer.echo(result)
 
 

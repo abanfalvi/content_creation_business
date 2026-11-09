@@ -9,6 +9,7 @@ from .state import MultiAgentState
 from ..book_selection_agent.agent import book_selection_agent
 from ..expert_builder_agent.agent import expert_builder_agent
 from ..script_drafter_agent.agent import script_drafter_agent
+from ..script_planner_agent.agent import script_planner_agent
 from ..utils import get_book_path
 
 # content_specialists/ — each specialist keeps its prompt at <agent_name>/prompt.md
@@ -19,6 +20,7 @@ class DirectorTools:
     "List of tools for the Content Director agent"
 
     @tool("select_books")
+    @staticmethod
     def call_book_selection_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Find the next relevant book to work on"
         result = book_selection_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::book_selection"}})
@@ -35,6 +37,7 @@ class DirectorTools:
         )
 
     @tool("build_expert_profile")
+    @staticmethod
     def call_expert_builder_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Create an expert persona for the book"
         undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "expert_builder_agent"})
@@ -60,12 +63,21 @@ class DirectorTools:
         )
 
     @tool("draft_script")
-    def call_script_drafter_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        "Draft the script for the next podcast episode"
+    @staticmethod
+    def call_script_drafter_agent(query: str, runtime: ToolRuntime[None, MultiAgentState], replan: bool = False):
+        "Draft the script for the next podcast episode from the Script Planner's cited plan. The planner runs automatically only when no plan exists yet. Set replan=True to rebuild the plan first: after the expert persona changed, or when feedback says the episode covers the wrong ideas, misses material or lacks depth. Leave it False for revisions of prose, structure or pacing, which reuse the existing plan."
+        thread_id = runtime.execution_info.thread_id
+        book_title = runtime.state.get("book_title")
+        plan_path = Path("data") / get_book_path(book_title) / "script_plan.md"
+        if replan or not plan_path.exists():
+            plan_request = f"Plan the script for the next book: {book_title}"
+            if replan:
+                plan_request += f"\n\nA plan may already exist and it needs rework. Reason and instructions:\n{query}"
+            _ = script_planner_agent.invoke({"messages": [{"role": "user", "content": plan_request}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_planner"}})
         undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "script_drafter_agent"})
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}], "book_title": runtime.state.get("book_title")}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::script_drafter"}})
+        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_drafter"}})
 
         return Command(
             update={
@@ -80,6 +92,7 @@ class DirectorTools:
         )
 
     @tool
+    @staticmethod
     def edit_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"], text_to_replace: str, text_to_replace_with: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Edit the system prompt of a specific specialist agent"
         if not runtime.state.get("system_prompt_read"):
@@ -102,6 +115,7 @@ class DirectorTools:
         })
 
     @tool
+    @staticmethod
     def read_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"]):
         "Read the system prompt of a specific specialist agent"
         with open(AGENTS_DIR / agent_name / "prompt.md", "r", encoding="utf-8") as f:
@@ -109,6 +123,7 @@ class DirectorTools:
         return agent_prompt
 
     @tool
+    @staticmethod
     def update_specialist_skills(agent_name: Literal["expert_builder_agent", "script_drafter_agent"], skill_name: str, updated_skill: str) -> str:
         "Use this tool when you need to refine any of the skills your specialist agents are using because they still produced undesired step even though there is a skill about it"
         path = f"src/skills/content_skills/{agent_name}/{skill_name}.md"
@@ -117,6 +132,7 @@ class DirectorTools:
         return f"{skill_name} under {agent_name} as been updated successfully"
 
     @tool("human_review")
+    @staticmethod
     def human_review(runtime: ToolRuntime[None, MultiAgentState]):
         "Pause the workflow for the user's approve/reject decision on the drafted script"
         book_title = runtime.state.get("book_title")
@@ -151,6 +167,7 @@ class DirectorTools:
 
 
     @tool
+    @staticmethod
     def save_learnable_traces(agent_name: Literal["expert_builder_agent", "script_drafter_agent"], success_trace: bool, title: str, description: str, content: Optional[str], avoid: Optional[str], prefer: Optional[str], runtime: ToolRuntime[None, MultiAgentState]):
         """
         Store both positive and undesired exemplary traces that can be used for improving the specialist agents

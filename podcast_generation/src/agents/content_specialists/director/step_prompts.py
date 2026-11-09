@@ -22,7 +22,8 @@ class ContentDirectorPrompt:
       having to invent anything itself.
 
     If the profile meets all of these, call call_script_drafter_agent to
-    move the book into script drafting. If it falls short on any point,
+    move the book into script drafting (pass replan=true if a script plan
+    already exists from an earlier version of this persona). If it falls short on any point,
     call call_expert_builder_agent and state specifically which criterion
     failed and what needs to change — don't send it back with vague
     feedback like "make it better."

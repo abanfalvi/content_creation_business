@@ -27,6 +27,7 @@ console = Console()
 WORKFLOWS = [
     "/books search",
     "/books preprocess",
+    "/books digest",
     "/content run",
     "/production run",
     "/distribution run",
@@ -59,6 +60,9 @@ COMMAND_SPECS: dict[str, list[dict]] = {
         {"name": "--book-genre", "kind": "text"},
         {"name": "--book-name", "kind": "text"},
         {"name": "--end-page", "kind": "text"},
+    ],
+    "/books digest": [
+        {"name": "--book-title", "kind": "book_picker"},
     ],
     "/content run": [
         {"name": "query", "positional": True, "kind": "text"},

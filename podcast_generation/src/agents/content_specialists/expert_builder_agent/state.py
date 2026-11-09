@@ -8,7 +8,7 @@ class ExpertBuilderState(AgentState):
     """State for the expert builder agent workflow."""
     current_step: NotRequired[ExpertBuilderStep]
     persona_read: NotRequired[bool]
-    book_title: NotRequired[str]
+    book_title: str
 
 # Script drafter agent
 ScriptDrafterStep = Literal["edit_script", "read_personas", "retrieve_content"]

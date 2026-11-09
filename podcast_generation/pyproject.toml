@@ -23,7 +23,6 @@ dependencies = [
     "langchain==1.3.14",
     "langchain-chroma==1.1.0",
     "langchain-classic==1.0.8",
-    "langchain-cohere==0.6.0",
     "langchain-core==1.5.3",
     "langchain-mcp-adapters==0.3.2",
     "langchain-openrouter==0.2.7",
@@ -57,7 +56,7 @@ notebook = [
 podcast = "src.cli.main:app"
 
 # No src/<pkg>/__init__.py files exist anywhere in this repo — code imports
-# things like `from src.agents...` and `from src.vector_db import ...`, i.e.
+# things like `from src.agents...` and `from src.book_preprocessing.store import ...`, i.e.
 # "src" itself is the top-level package name. These are implicit namespace
 # packages (PEP 420), so discovery has to be told to include them explicitly.
 [tool.setuptools.packages.find]

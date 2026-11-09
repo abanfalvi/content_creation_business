@@ -8,4 +8,5 @@ class ScriptDrafterState(AgentState):
     """State for the script drafter agent workflow."""
     current_step: NotRequired[ScriptDrafterStep]
     script_read: NotRequired[bool]
-    book_title: NotRequired[str]
+    book_title: str
+    verify_attempts: NotRequired[int]

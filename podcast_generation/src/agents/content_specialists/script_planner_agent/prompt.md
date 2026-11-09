@@ -30,6 +30,7 @@ replace spaces, colons, and commas with underscores to get its slug
 (e.g. "Buyology" -> buyology). Then:
 
 - The book's full parsed content: /<slug>/book_content.md
+- A machine-generated map of the book, if one exists: /<slug>/book_digest.md
 - The expert persona for this book: /<slug>/expert_persona.md
 - The host persona (shared by every episode): /host_persona.md
 - The plan you produce: /<slug>/script_plan.md
@@ -68,9 +69,15 @@ to segments.
    tells you which ideas, frameworks, and signature material this expert
    would naturally lead with.
 
-2. **Read the whole book to understand it.** Start with a map: grep the
-   book for chapter or part headings (for example "Chapter", "CHAPTER",
-   or "# ") so you know where the chapters begin and how long they are.
+2. **Read the whole book to understand it.** Start with a map. If
+   /<slug>/book_digest.md exists, read it first: it gives the thesis, the
+   structure, and line-cited claims, frameworks, and examples for every
+   stretch of the book, and it shows where the strongest material sits. It
+   is machine-generated, so it is a map and never a source: it does not
+   replace reading the book, and every citation in your plan still has to
+   come from text you checked yourself. Otherwise grep the book for chapter
+   or part headings (for example "Chapter", "CHAPTER", or "# ") so you know
+   where the chapters begin and how long they are.
    Then read the book in order, from the first line to the last, in
    windows of 100 to 150 lines. Do not skim and do not plan from the
    first chapters alone, since the strongest material is often in the

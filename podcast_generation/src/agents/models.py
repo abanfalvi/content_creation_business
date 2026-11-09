@@ -7,14 +7,12 @@ Opik themselves.
 """
 from dotenv import load_dotenv
 
-# Must run before `import opik`: opik reads OPIK_* env vars (e.g. the console
-# logging level) once, at import time.
 load_dotenv()
 
-import opik
+import opik, os
 from opik.integrations.langchain import OpikTracer, track_langgraph
 
-opik.configure(workspace="dreadnought0073", project_name="podcast_generation", install_mcp=False)
+opik.configure(workspace=os.environ.get("OPIK_WORKSPACE"), project_name="podcast_generation", install_mcp=False)
 
 
 def track(graph, trace=True):
@@ -35,6 +33,8 @@ BOOK_SELECTION_MODEL = "inclusionai/ling-3.0-flash"
 EXPERT_BUILDER_MODEL = "minimax/minimax-m3.1-flash"
 SCRIPT_DRAFTER_MODEL = "minimax/minimax-m3.1-flash"
 SCRIPT_PLANNER_MODEL = "minimax/minimax-m3.1-flash"
+EVALUATOR_MODEL = "z-ai/glm-5.3-flash"
+DIGEST_MODEL = "z-ai/glm-5.3-flash" 
 DIRECTOR_MODEL = "deepseek/deepseek-v4-flash-0731"
 
 # Production specialists
@@ -55,4 +55,4 @@ LL_EXTRACTOR_AGENT = "deepseek/deepseek-v4-flash-0731"
 SKILL_CONVERTER_MODEL = "cohere/north-mini-code:free"
 
 # Decision model used
-DECISION_JUDGE = "inception/mercury-decide"
+DECISION_JUDGE = "parallel/decisions-fast:free"
