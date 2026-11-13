@@ -1,7 +1,7 @@
 """The generate -> approve script -> approve audio -> publish flow, with scripted stand-ins for the agent graphs."""
 from types import SimpleNamespace
 
-from conftest import make_pdf, wait_for
+from conftest import make_pdf, nb_url, wait_for
 from langgraph.types import Command
 
 from podcast_generation.services import generation, sources
@@ -44,8 +44,8 @@ def add_ready_source(client, monkeypatch, name="Deep_Work.pdf"):
         return "ok"
 
     monkeypatch.setattr(sources, "preprocess_book", fake)
-    client.post("/api/sources", files=[("files", (name, make_pdf(), "application/pdf"))])
-    wait_for(lambda: all(s["status"] == "ready" for s in client.get("/api/sources").json()))
+    client.post(nb_url(client, "sources"), files=[("files", (name, make_pdf(), "application/pdf"))])
+    wait_for(lambda: all(s["status"] == "ready" for s in client.get(nb_url(client, "sources")).json()))
 
 
 def job(client, job_id):
@@ -102,7 +102,7 @@ def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypat
     client.post(f"/api/jobs/{job_id}/decision", json={"approved": True})
 
     done = wait_for(lambda: (j := job(client, job_id))["status"] == "done" and j)
-    episode = client.get("/api/episodes").json()[0]
+    episode = client.get(nb_url(client, "episodes")).json()[0]
     assert done["result"]["episode_id"] == episode["id"] and episode["title"] == "Deep Work"
     assert client.get(episode["audio_url"]).content == b"ID3-final"
 
@@ -154,8 +154,8 @@ def test_publish_an_episode(client, monkeypatch, tmp_path):
     audio, script = tmp_path / "e.mp3", tmp_path / "e_script.md"
     audio.write_bytes(b"audio")
     script.write_text(SCRIPT, encoding="utf-8")
-    db.insert("episodes", {"id": "ep1", "slug": "deep_work", "title": "Deep Work", "audio_path": str(audio),
-                           "script_path": str(script), "job_id": "j", "created_at": db.now()})
+    db.insert("episodes", {"id": "ep1", "notebook_id": client.nb, "slug": "deep_work", "title": "Deep Work",
+                           "audio_path": str(audio), "script_path": str(script), "job_id": "j", "created_at": db.now()})
 
     seen = {}
 
@@ -172,7 +172,7 @@ def test_publish_an_episode(client, monkeypatch, tmp_path):
     assert done["result"]["message"] == "Scheduled for Friday 9:00."
     assert seen["input"]["script_path"] == str(script)
 
-    episode = client.get("/api/episodes").json()[0]
+    episode = client.get(nb_url(client, "episodes")).json()[0]
     assert episode["published_at"] and episode["publish_result"] == "Scheduled for Friday 9:00."
     assert client.post("/api/episodes/ep1/publish").status_code == 409
     assert client.post("/api/episodes/nope/publish").status_code == 404

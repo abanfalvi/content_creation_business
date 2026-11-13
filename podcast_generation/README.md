@@ -230,6 +230,10 @@ uv sync                                   # creates .venv from uv.lock and insta
 cd frontend && npm install && npm run build   # builds the UI into frontend/dist
 ```
 
+For a local Postgres, `docker compose up -d postgres` starts one from [docker-compose.yml](docker-compose.yml) (data
+persists in a Docker volume; `docker compose down -v` deletes it). Point `POSTGRES_URI` at it:
+`postgresql://podcast:podcast@localhost:5432/podcast`.
+
 ffmpeg for audio editing comes from `static_ffmpeg` (downloaded on first use). Dependencies live in `pyproject.toml`
 (pinned) and `uv.lock`; change them with `uv add` / `uv remove` rather than editing the venv by hand, because
 `uv sync` removes anything not declared.

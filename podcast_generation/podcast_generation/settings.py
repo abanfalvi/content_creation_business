@@ -1,12 +1,3 @@
-"""Central configuration: where things live on disk, and the environment.
-
-Importing this module loads `.env` (once, from the project root) and nothing else:
-no network, no database, no files are created. Everything that talks to the outside
-world is built lazily by the code that needs it.
-
-Paths here are absolute and independent of the working directory, so the CLI, a
-server and tests all see the same files no matter where they are started from.
-"""
 import os
 from pathlib import Path
 

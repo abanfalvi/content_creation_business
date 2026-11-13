@@ -1,4 +1,3 @@
-"""The web app: JSON/SSE API under /api, plus the built React frontend at / when it exists."""
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -7,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from podcast_generation.services import chat, db, generation, sources
+from podcast_generation.services import chat, db, generation, notebooks, sources
 from podcast_generation.settings import FRONTEND_DIST
 
 from .routes import router
@@ -31,6 +30,7 @@ app = FastAPI(title="Level Up Lab", lifespan=lifespan)
 app.include_router(router)
 
 
+@app.exception_handler(notebooks.NotebookError)
 @app.exception_handler(sources.SourceError)
 @app.exception_handler(generation.GenerationError)
 async def _domain_error(_: Request, exc: Exception):

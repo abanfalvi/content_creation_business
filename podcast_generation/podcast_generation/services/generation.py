@@ -1,14 +1,3 @@
-"""Episode generation.
-
-Two LangGraph runs in sequence, each paused by a human gate:
-
-  content     expert profile -> script plan -> script            gate: approve / reject the script
-  production  text-to-speech -> audio engineering                gate: approve / reject the audio
-
-`advance()` runs a job until the next gate (or the end). It is called once to start a job and
-once per user decision, so a job waiting for approval survives a server restart: the graphs'
-state is in their checkpoint databases and the next decision simply resumes them.
-"""
 import logging
 import re
 import shutil
@@ -19,7 +8,7 @@ from langgraph.types import Command
 
 from podcast_generation.settings import DATA_DIR, project_path
 
-from . import db, sources
+from . import db, notebooks, sources
 
 log = logging.getLogger(__name__)
 
@@ -75,19 +64,20 @@ def get_job(job_id: str) -> dict | None:
     return db.one("SELECT * FROM jobs WHERE id = ?", [job_id])
 
 
-def list_jobs(limit: int = 30) -> list[dict]:
-    return db.query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", [limit])
+def list_jobs(notebook_id: str, limit: int = 30) -> list[dict]:
+    return db.query("SELECT * FROM jobs WHERE notebook_id = ? ORDER BY created_at DESC LIMIT ?", [notebook_id, limit])
 
 
 def _set(job_id: str, **fields) -> None:
     db.update("jobs", "id", job_id, updated_at=db.now(), **fields)
 
 
-def _new_job(kind: str, slug: str, **extra) -> dict:
+def _new_job(kind: str, slug: str, notebook_id: str, **extra) -> dict:
     ts = db.now()
-    job = {"id": db.new_id(), "kind": kind, "slug": slug, "status": "running", "stage": "", "error": "",
-           "created_at": ts, "updated_at": ts, **extra}
+    job = {"id": db.new_id(), "notebook_id": notebook_id, "kind": kind, "slug": slug, "status": "running",
+           "stage": "", "error": "", "created_at": ts, "updated_at": ts, **extra}
     db.insert("jobs", job)
+    notebooks.touch(notebook_id)
     return get_job(job["id"])
 
 
@@ -150,7 +140,7 @@ def start_generation(slug: str) -> dict:
     if _active_job("generate", slug=slug):
         raise GenerationError("An episode is already being generated from this source.", 409)
     _archive_previous_run(slug)
-    return _new_job("generate", slug, stage="content", result={"script_approved": False})
+    return _new_job("generate", slug, src["notebook_id"], stage="content", result={"script_approved": False})
 
 
 def _archive_previous_run(slug: str) -> None:
@@ -270,7 +260,7 @@ def _finish(job: dict, outcome: dict) -> None:
     shutil.copy2(audio, audio_copy)
     shutil.copy2(DATA_DIR / slug / "script.md", script_copy)
     db.insert("episodes", {
-        "id": episode_id, "slug": slug, "title": sources.get_source(slug)["title"],
+        "id": episode_id, "notebook_id": job["notebook_id"], "slug": slug, "title": sources.get_source(slug)["title"],
         "audio_path": str(audio_copy), "script_path": str(script_copy),
         "job_id": job["id"], "created_at": db.now(),
     })
@@ -279,8 +269,8 @@ def _finish(job: dict, outcome: dict) -> None:
 
 # --- episodes -------------------------------------------------------------------------------
 
-def list_episodes() -> list[dict]:
-    return db.query("SELECT * FROM episodes ORDER BY created_at DESC")
+def list_episodes(notebook_id: str) -> list[dict]:
+    return db.query("SELECT * FROM episodes WHERE notebook_id = ? ORDER BY created_at DESC", [notebook_id])
 
 
 def get_episode(episode_id: str) -> dict | None:
@@ -295,7 +285,7 @@ def start_publish(episode_id: str) -> dict:
         raise GenerationError("This episode has already been published.", 409)
     if _active_job("publish", episode_id=episode_id):
         raise GenerationError("This episode is already being published.", 409)
-    return _new_job("publish", episode["slug"], episode_id=episode_id)
+    return _new_job("publish", episode["slug"], episode["notebook_id"], episode_id=episode_id)
 
 
 async def run_publish(job_id: str) -> None:

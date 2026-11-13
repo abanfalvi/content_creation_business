@@ -31,12 +31,19 @@ def make_pdf(pages: int = 3) -> bytes:
 
 @pytest.fixture()
 def client(tmp_path):
+    """A test client with a fresh database and one notebook, whose id is `client.nb`."""
     from podcast_generation.api.main import app
     from podcast_generation.services import db
 
     with TestClient(app) as c:
         db.init(tmp_path / "app.db")  # fresh records for every test
+        c.nb = c.post("/api/notebooks", json={"title": "Test notebook"}).json()["id"]
         yield c
+
+
+def nb_url(client, path: str) -> str:
+    """URL of a notebook-scoped endpoint of the client's notebook, e.g. nb_url(client, "sources")."""
+    return f"/api/notebooks/{client.nb}/{path}"
 
 
 def wait_for(fn, timeout: float = 10.0, interval: float = 0.05):

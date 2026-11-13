@@ -1,9 +1,3 @@
-"""Tiny SQLite store for the web app's own records.
-
-Sources, chat sessions, generation/publish jobs and episodes live here. The agents'
-conversation state is NOT here: it stays in the LangGraph checkpoint databases.
-One shared connection guarded by a lock is plenty for a single-user app.
-"""
 import json
 import sqlite3
 import threading
@@ -14,8 +8,15 @@ from typing import Any, Iterable
 from podcast_generation.settings import APP_DB_PATH
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS notebooks (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sources (
     slug        TEXT PRIMARY KEY,
+    notebook_id TEXT,                     -- the notebook this source belongs to
     title       TEXT NOT NULL,
     filename    TEXT NOT NULL,
     pdf_path    TEXT NOT NULL,
@@ -27,12 +28,14 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
+    notebook_id TEXT,
     title       TEXT NOT NULL,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
+    notebook_id TEXT,
     kind        TEXT NOT NULL,            -- generate | publish
     slug        TEXT NOT NULL,
     episode_id  TEXT,                     -- publish jobs: the episode being published
@@ -46,6 +49,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE TABLE IF NOT EXISTS episodes (
     id              TEXT PRIMARY KEY,
+    notebook_id     TEXT,
     slug            TEXT NOT NULL,
     title           TEXT NOT NULL,
     audio_path      TEXT NOT NULL,
@@ -56,6 +60,10 @@ CREATE TABLE IF NOT EXISTS episodes (
     publish_result  TEXT
 );
 """
+
+# Tables whose rows belong to a notebook.
+_NOTEBOOK_TABLES = ("sources", "sessions", "jobs", "episodes")
+DEFAULT_NOTEBOOK_TITLE = "My notebook"
 
 _JSON_COLUMNS = {"gate", "result"}
 _lock = threading.RLock()
@@ -71,7 +79,43 @@ def init(path=None) -> None:
         _conn = sqlite3.connect(path or APP_DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(_SCHEMA)
+        _migrate(_conn)
         _conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring a database created before notebooks existed up to date.
+
+    Adds the `notebook_id` columns and moves every existing source, chat, job and episode into one
+    default notebook, so nothing the user already has disappears. Does nothing on a current database.
+    """
+    for table in _NOTEBOOK_TABLES:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if "notebook_id" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN notebook_id TEXT")
+
+    orphans = sum(
+        conn.execute(f"SELECT COUNT(*) FROM {table} WHERE notebook_id IS NULL").fetchone()[0] for table in _NOTEBOOK_TABLES
+    )
+    if not orphans:
+        return
+    row = conn.execute("SELECT id FROM notebooks ORDER BY created_at LIMIT 1").fetchone()
+    if row:
+        notebook_id = row["id"]
+    else:
+        notebook_id, ts = new_id(), now()
+        conn.execute(
+            "INSERT INTO notebooks (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            [notebook_id, DEFAULT_NOTEBOOK_TITLE, ts, ts],
+        )
+    for table in ("sources", "sessions"):
+        conn.execute(f"UPDATE {table} SET notebook_id = ? WHERE notebook_id IS NULL", [notebook_id])
+    for table in ("jobs", "episodes"):  # follow their source; fall back for ones whose source was deleted
+        conn.execute(
+            f"UPDATE {table} SET notebook_id = (SELECT notebook_id FROM sources WHERE sources.slug = {table}.slug) "
+            "WHERE notebook_id IS NULL"
+        )
+        conn.execute(f"UPDATE {table} SET notebook_id = ? WHERE notebook_id IS NULL", [notebook_id])
 
 
 def new_id() -> str:

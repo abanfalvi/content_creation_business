@@ -75,6 +75,8 @@ audio { width: 100%; height: 36px; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .btn.primary:hover:not(:disabled) { background: #a8c7fa; }
 .btn.ghost { border-color: transparent; }
+.btn.danger { background: var(--bad); color: #3b0a07; border-color: transparent; }
+.btn.danger:hover:not(:disabled) { background: #f6a49d; }
 .btn.wide-btn { width: 100%; background: var(--panel-2); border-color: var(--panel-2); }
 .btn.wide-btn:hover:not(:disabled) { background: var(--panel-3); }
 .btn.small-btn { padding: 5px 14px; font-size: 13px; align-self: flex-start; }
@@ -210,6 +212,47 @@ audio { width: 100%; height: 36px; }
 .episode-pick li.published { opacity: 0.7; }
 .episode-pick label { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .pick-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* ---- renaming -------------------------------------------------------------- */
+a.icon-btn, a.btn { text-decoration: none; }
+.title-input {
+  min-width: 0; flex: 1; font: inherit; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--accent); border-radius: 10px; padding: 6px 10px; outline: 0;
+}
+.notebook-title { min-width: 0; }
+.title-btn {
+  display: flex; align-items: center; gap: 8px; max-width: 100%; background: none; border: 0; padding: 4px 10px;
+  border-radius: 10px; font: inherit; font-weight: inherit; letter-spacing: inherit;
+}
+.title-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-btn svg { flex: none; color: var(--muted); opacity: 0; }
+.title-btn:hover { background: var(--panel-2); }
+.title-btn:hover svg, .title-btn:focus-visible svg { opacity: 1; }
+.notebook-title-input { font-size: 20px; font-weight: 600; max-width: 520px; }
+.menu-rename { margin: 2px 4px; }
+
+/* ---- home ------------------------------------------------------------------ */
+.home { flex: 1; min-height: 0; overflow-y: auto; padding: 8px clamp(16px, 5%, 64px) 48px; }
+.home-inner { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-head h2 { font-size: 24px; font-weight: 500; }
+.nb-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.nb-card {
+  position: relative; background: var(--panel); border-radius: var(--radius); padding: 16px 16px 14px 18px;
+  display: flex; flex-direction: column; gap: 12px; min-height: 140px; transition: background 0.15s;
+}
+.nb-card:hover { background: var(--panel-2); }
+.nb-card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nb-top { display: flex; align-items: flex-start; gap: 6px; }
+.nb-title { flex: 1; min-width: 0; color: var(--text); text-decoration: none; font-size: 18px; font-weight: 500; overflow-wrap: anywhere; padding-top: 4px; }
+.nb-title:focus-visible { outline: 0; }
+.nb-title::after { content: ''; position: absolute; inset: 0; border-radius: var(--radius); } /* the whole card opens the notebook */
+.nb-action, .nb-top .title-input { position: relative; z-index: 1; } /* ...except the rename and delete controls */
+.nb-action { width: 32px; height: 32px; }
+.nb-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: auto; }
+.nb-stats span { display: inline-flex; align-items: center; gap: 5px; }
+.page-empty { margin: auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
+.page-empty h2 { font-weight: 500; }
 
 @media (max-width: 1000px) {
   :root { --side-w: 280px; }

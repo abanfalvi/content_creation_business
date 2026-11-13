@@ -1,20 +1,26 @@
 import { AlertCircle, CheckCircle2, Loader2, Mic, PanelRightClose, PanelRightOpen, Send } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Job, type Source } from '../api'
-import { formatTime, usePolling } from '../hooks'
+import { POLL_FAST, POLL_IDLE, formatTime, usePolling } from '../hooks'
 import ApprovalModal from './ApprovalModal'
 import PublishModal from './PublishModal'
 
+// Jobs only change on their own while one is running. A job waiting for approval changes when the user decides,
+// and that action refreshes immediately.
+const jobsPace = (list: Job[]) => (list.some((j) => j.status === 'running') ? POLL_FAST : POLL_IDLE)
+
 interface Props {
+  notebookId: string
   open: boolean
   onToggle: () => void
   sources: Source[]
   selectedSlugs: string[] // ready sources currently ticked
 }
 
-export default function StudioPanel({ open, onToggle, sources, selectedSlugs }: Props) {
-  const { data: jobs, refresh: refreshJobs } = usePolling(() => api.jobs(), 2500, [] as Job[])
-  const { data: episodes, refresh: refreshEpisodes } = usePolling(() => api.episodes(), 6000, [])
+export default function StudioPanel({ notebookId, open, onToggle, sources, selectedSlugs }: Props) {
+  const { data: jobs, refresh: refreshJobs } = usePolling(() => api.jobs(notebookId), jobsPace, [] as Job[])
+  // Episodes change only when a job finishes, which refreshes them below; this slow tick is just a safety net.
+  const { data: episodes, refresh: refreshEpisodes } = usePolling(() => api.episodes(notebookId), POLL_IDLE, [])
   const [reviewId, setReviewId] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState('')

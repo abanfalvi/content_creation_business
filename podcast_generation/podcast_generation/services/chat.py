@@ -22,7 +22,7 @@ from podcast_generation.book_preprocessing.store import vector_store
 from podcast_generation.reranker import OpenRouterRerank
 from podcast_generation.settings import checkpoint_db
 
-from . import db
+from . import db, notebooks
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ You answer the user's questions about the books they have selected as sources.
 """
 
 
-def search_chunks(slugs: Sequence[str], query: str, top_n: int = 6) -> list[dict]:
+def search_chunks(slugs: Sequence[str], query: str, top_n: int = 8) -> list[dict]:
     """Semantic search over the chosen books, reranked. Blocking (network calls)."""
     retriever = vector_store.as_retriever(search_kwargs={"k": 40, "filter": {"book_slug": {"$in": list(slugs)}}})
     compressed = ContextualCompressionRetriever(
@@ -175,10 +175,11 @@ def _turn_artifacts(messages: list) -> list[list[dict]]:
 
 # --- session list (app database) -------------------------------------------------------
 
-def create_session(title: str = "New chat") -> dict:
+def create_session(notebook_id: str, title: str = "New chat") -> dict:
     sid = db.new_id()
     ts = db.now()
-    db.insert("sessions", {"id": sid, "title": title, "created_at": ts, "updated_at": ts})
+    db.insert("sessions", {"id": sid, "notebook_id": notebook_id, "title": title, "created_at": ts, "updated_at": ts})
+    notebooks.touch(notebook_id)
     return get_session(sid)
 
 
@@ -186,17 +187,27 @@ def get_session(session_id: str) -> dict | None:
     return db.one("SELECT * FROM sessions WHERE id = ?", [session_id])
 
 
-def list_sessions() -> list[dict]:
-    return db.query("SELECT * FROM sessions ORDER BY updated_at DESC")
+def list_sessions(notebook_id: str) -> list[dict]:
+    return db.query("SELECT * FROM sessions WHERE notebook_id = ? ORDER BY updated_at DESC", [notebook_id])
 
 
 def touch_session(session_id: str, first_message: str | None = None) -> None:
-    """Bump the session to the top of the list; name it after its first message."""
+    """Bump the session to the top of the list; name it after its first message (unless it was renamed)."""
     fields: dict = {"updated_at": db.now()}
     session = get_session(session_id)
     if session and first_message and session["title"] == "New chat":
         fields["title"] = first_message.strip().replace("\n", " ")[:60] or "New chat"
     db.update("sessions", "id", session_id, **fields)
+    if session:
+        notebooks.touch(session["notebook_id"])
+
+
+def rename_session(session_id: str, title: str) -> dict | None:
+    """Give a chat a new title. Returns the updated session, or None if there is no such chat."""
+    if get_session(session_id) is None:
+        return None
+    db.update("sessions", "id", session_id, title=title)
+    return get_session(session_id)
 
 
 def delete_session_row(session_id: str) -> None:

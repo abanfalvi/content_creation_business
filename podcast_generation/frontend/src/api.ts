@@ -1,5 +1,15 @@
 // Types and calls for the Level Up Lab API (podcast_generation/api/routes.py).
 
+export interface Notebook {
+  id: string
+  title: string
+  created_at: number
+  updated_at: number
+  source_count: number
+  chat_count: number
+  episode_count: number
+}
+
 export type SourceStatus = 'processing' | 'ready' | 'failed'
 
 export interface Source {
@@ -77,7 +87,17 @@ export type ChatEvent =
   | { type: 'done' }
   | { type: 'error'; message: string }
 
-async function failure(res: Response): Promise<Error> {
+/** An error response from the API; `status` is the HTTP status (404 = it does not exist). */
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+async function failure(res: Response): Promise<ApiError> {
   let detail = `${res.status} ${res.statusText}`
   try {
     const body = await res.json()
@@ -86,7 +106,7 @@ async function failure(res: Response): Promise<Error> {
   } catch {
     /* not JSON */
   }
-  return new Error(detail)
+  return new ApiError(detail, res.status)
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -101,26 +121,36 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
+const patch = (body: unknown): RequestInit => ({ ...json(body), method: 'PATCH' })
+
 export const api = {
-  sources: () => request<Source[]>('/sources'),
-  uploadSources(files: File[]) {
+  notebooks: () => request<Notebook[]>('/notebooks'),
+  notebook: (id: string) => request<Notebook>(`/notebooks/${id}`),
+  createNotebook: () => request<Notebook>('/notebooks', { method: 'POST' }),
+  renameNotebook: (id: string, title: string) => request<Notebook>(`/notebooks/${id}`, patch({ title })),
+  deleteNotebook: (id: string) => request<void>(`/notebooks/${id}`, { method: 'DELETE' }),
+
+  // Everything below belongs to one notebook.
+  sources: (notebookId: string) => request<Source[]>(`/notebooks/${notebookId}/sources`),
+  uploadSources(notebookId: string, files: File[]) {
     const form = new FormData()
     files.forEach((f) => form.append('files', f))
-    return request<UploadResult[]>('/sources', { method: 'POST', body: form })
+    return request<UploadResult[]>(`/notebooks/${notebookId}/sources`, { method: 'POST', body: form })
   },
   deleteSource: (slug: string) => request<void>(`/sources/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
 
-  sessions: () => request<Session[]>('/chat/sessions'),
-  createSession: () => request<Session>('/chat/sessions', { method: 'POST' }),
+  sessions: (notebookId: string) => request<Session[]>(`/notebooks/${notebookId}/chat/sessions`),
+  createSession: (notebookId: string) => request<Session>(`/notebooks/${notebookId}/chat/sessions`, { method: 'POST' }),
+  renameSession: (id: string, title: string) => request<Session>(`/chat/sessions/${id}`, patch({ title })),
   deleteSession: (id: string) => request<void>(`/chat/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => request<ChatMessage[]>(`/chat/sessions/${id}/messages`),
 
   generate: (sourceSlug: string) => request<Job>('/generate', json({ source_slug: sourceSlug })),
-  jobs: () => request<Job[]>('/jobs'),
+  jobs: (notebookId: string) => request<Job[]>(`/notebooks/${notebookId}/jobs`),
   decide: (jobId: string, approved: boolean, feedback = '') =>
     request<Job>(`/jobs/${jobId}/decision`, json({ approved, feedback })),
 
-  episodes: () => request<Episode[]>('/episodes'),
+  episodes: (notebookId: string) => request<Episode[]>(`/notebooks/${notebookId}/episodes`),
   publish: (episodeId: string) => request<Job>(`/episodes/${episodeId}/publish`, { method: 'POST' }),
 }
 

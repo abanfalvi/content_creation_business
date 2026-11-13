@@ -1,8 +1,3 @@
-"""Source PDFs: upload, automatic preprocessing, listing, deletion.
-
-A source's identity is its slug (`get_book_path(title)`), the same key the agents and the
-vector store use. The title comes from the file name.
-"""
 import asyncio
 import io
 import logging
@@ -16,7 +11,7 @@ from podcast_generation.agents.content_specialists.utils import get_book_path
 from podcast_generation.book_preprocessing.pipeline import preprocess_book
 from podcast_generation.settings import UPLOAD_DIR
 
-from . import db
+from . import db, notebooks
 
 log = logging.getLogger(__name__)
 
@@ -35,16 +30,19 @@ def title_from_filename(filename: str) -> str:
     return re.sub(r"\s+", " ", stem.replace("_", " ")).strip()
 
 
-def list_sources() -> list[dict]:
-    return db.query("SELECT * FROM sources ORDER BY created_at")
+def list_sources(notebook_id: str) -> list[dict]:
+    return db.query("SELECT * FROM sources WHERE notebook_id = ? ORDER BY created_at", [notebook_id])
 
 
 def get_source(slug: str) -> dict | None:
     return db.one("SELECT * FROM sources WHERE slug = ?", [slug])
 
 
-def create_source(filename: str, data: bytes) -> dict:
-    """Validate and store an uploaded PDF and register it as `processing`. Call `ingest` to process it."""
+def create_source(notebook_id: str, filename: str, data: bytes) -> dict:
+    """Validate and store an uploaded PDF in a notebook and register it as `processing`. Call `ingest` to process it.
+
+    A book's slug names its vector-store entries and working folder, so one book can only live in one notebook.
+    """
     if not filename.lower().endswith(".pdf"):
         raise SourceError(f"{filename}: only PDF files can be added.")
     title = title_from_filename(filename)
@@ -60,20 +58,25 @@ def create_source(filename: str, data: bytes) -> dict:
 
     existing = get_source(slug)
     if existing and existing["status"] != "failed":
-        raise SourceError(f"{title!r} is already in your sources.", status_code=409)
+        if existing["notebook_id"] == notebook_id:
+            raise SourceError(f"{title!r} is already in your sources.", status_code=409)
+        other = notebooks.get_notebook(existing["notebook_id"])
+        where = f"the notebook {other['title']!r}" if other else "another notebook"
+        raise SourceError(f"{title!r} is already in {where}. A book can only be used in one notebook.", status_code=409)
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     pdf_path = UPLOAD_DIR / f"{slug}.pdf"
     pdf_path.write_bytes(data)
 
     row = {
-        "slug": slug, "title": title, "filename": filename, "pdf_path": str(pdf_path), "pages": pages,
-        "status": "processing", "stage": "Queued", "error": "", "created_at": db.now(),
+        "slug": slug, "notebook_id": notebook_id, "title": title, "filename": filename, "pdf_path": str(pdf_path),
+        "pages": pages, "status": "processing", "stage": "Queued", "error": "", "created_at": db.now(),
     }
     if existing:  # a failed source is replaced by the new upload
         db.update("sources", "slug", slug, **{k: v for k, v in row.items() if k != "slug"})
     else:
         db.insert("sources", row)
+    notebooks.touch(notebook_id)
     return get_source(slug)
 
 

@@ -1,7 +1,7 @@
 import json
 from typing import Any, Iterator
 
-from conftest import make_pdf, wait_for
+from conftest import make_pdf, nb_url, wait_for
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -43,8 +43,8 @@ def add_ready_source(client, monkeypatch):
         return "ok"
 
     monkeypatch.setattr(sources, "preprocess_book", fake)
-    client.post("/api/sources", files=[("files", ("Deep_Work.pdf", make_pdf(), "application/pdf"))])
-    wait_for(lambda: client.get("/api/sources").json()[0]["status"] == "ready")
+    client.post(nb_url(client, "sources"), files=[("files", ("Deep_Work.pdf", make_pdf(), "application/pdf"))])
+    wait_for(lambda: client.get(nb_url(client, "sources")).json()[0]["status"] == "ready")
 
 
 def use_model(monkeypatch, *messages):
@@ -64,20 +64,20 @@ ANSWER = AIMessage(content="Work without distraction [Deep Work, Rule 1].")
 
 
 def test_sessions_can_be_created_listed_and_deleted(client):
-    first = client.post("/api/chat/sessions").json()
-    second = client.post("/api/chat/sessions").json()
+    first = client.post(nb_url(client, "chat/sessions")).json()
+    second = client.post(nb_url(client, "chat/sessions")).json()
     assert first["title"] == "New chat"
-    assert {s["id"] for s in client.get("/api/chat/sessions").json()} == {first["id"], second["id"]}
+    assert {s["id"] for s in client.get(nb_url(client, "chat/sessions")).json()} == {first["id"], second["id"]}
 
     assert client.delete(f"/api/chat/sessions/{first['id']}").status_code == 204
-    assert [s["id"] for s in client.get("/api/chat/sessions").json()] == [second["id"]]
+    assert [s["id"] for s in client.get(nb_url(client, "chat/sessions")).json()] == [second["id"]]
     assert client.get(f"/api/chat/sessions/{first['id']}/messages").status_code == 404
 
 
 def test_question_streams_an_answer_with_citations_and_is_remembered(client, monkeypatch):
     add_ready_source(client, monkeypatch)
     searched = use_model(monkeypatch, TOOL_CALL, ANSWER)
-    session = client.post("/api/chat/sessions").json()
+    session = client.post(nb_url(client, "chat/sessions")).json()
 
     response = client.post(
         f"/api/chat/sessions/{session['id']}/messages",
@@ -100,12 +100,12 @@ def test_question_streams_an_answer_with_citations_and_is_remembered(client, mon
     assert [s["title"] for s in history[1]["sources"]] == ["Deep Work", "Deep Work"]
 
     # the session is named after its first message
-    assert client.get("/api/chat/sessions").json()[0]["title"] == "How do I focus?"
+    assert client.get(nb_url(client, "chat/sessions")).json()[0]["title"] == "How do I focus?"
 
 
 def test_asking_requires_a_ready_selected_source(client, monkeypatch):
     use_model(monkeypatch, ANSWER)
-    session = client.post("/api/chat/sessions").json()
+    session = client.post(nb_url(client, "chat/sessions")).json()
     response = client.post(f"/api/chat/sessions/{session['id']}/messages", json={"message": "Hi", "source_slugs": []})
     assert response.status_code == 422
     assert client.post("/api/chat/sessions/nope/messages", json={"message": "Hi", "source_slugs": ["x"]}).status_code == 404
@@ -118,7 +118,7 @@ def test_model_errors_reach_the_client_as_an_error_event(client, monkeypatch):
         raise RuntimeError("no API key")
 
     monkeypatch.setattr(chat, "build_chat_model", broken)
-    session = client.post("/api/chat/sessions").json()
+    session = client.post(nb_url(client, "chat/sessions")).json()
     events = sse_events(client.post(
         f"/api/chat/sessions/{session['id']}/messages", json={"message": "Hi", "source_slugs": ["deep_work"]}
     ))
@@ -139,7 +139,7 @@ class StreamingModel(ScriptedModel):
 def test_tokens_of_a_streaming_model_arrive_incrementally_and_exactly_once(client, monkeypatch):
     add_ready_source(client, monkeypatch)
     monkeypatch.setattr(chat, "build_chat_model", lambda: StreamingModel())
-    session = client.post("/api/chat/sessions").json()
+    session = client.post(nb_url(client, "chat/sessions")).json()
     events = sse_events(client.post(
         f"/api/chat/sessions/{session['id']}/messages", json={"message": "Hi", "source_slugs": ["deep_work"]}
     ))

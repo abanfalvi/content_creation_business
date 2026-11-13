@@ -1,11 +1,14 @@
-import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Plus, Trash2 } from 'lucide-react'
+import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, streamChat, type ChatMessage, type Session } from '../api'
 import { usePersistentState } from '../hooks'
+import MessageModal from './MessageModal'
+import TitleInput from './TitleInput'
 
 interface Props {
+  notebookId: string
   selectedSlugs: string[]
 }
 
@@ -15,9 +18,11 @@ const SUGGESTIONS = [
   'Give me three insights worth turning into an episode',
 ]
 
-export default function ChatPanel({ selectedSlugs }: Props) {
+export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
   const [sessions, setSessions] = useState<Session[]>([])
-  const [activeId, setActiveId] = usePersistentState<string | null>('chatSession', null)
+  const [activeId, setActiveId] = usePersistentState<string | null>(`${notebookId}:chatSession`, null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [problem, setProblem] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -35,13 +40,13 @@ export default function ChatPanel({ selectedSlugs }: Props) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const list = await api.sessions()
+      const list = await api.sessions(notebookId)
       setSessions(list)
       return list
     } catch {
       return []
     }
-  }, [])
+  }, [notebookId])
 
   // Restore the last open chat (or the most recent one) on first load.
   useEffect(() => {
@@ -98,7 +103,7 @@ export default function ChatPanel({ selectedSlugs }: Props) {
     setMenuOpen(false)
     if (activeId && messages.length === 0) return inputRef.current?.focus() // already a blank chat
     try {
-      const session = await api.createSession()
+      const session = await api.createSession(notebookId)
       setSessions((list) => [session, ...list])
       setActiveId(session.id)
       setMessages([])
@@ -106,6 +111,16 @@ export default function ChatPanel({ selectedSlugs }: Props) {
       inputRef.current?.focus()
     } catch {
       /* server unreachable: the banner in the header already says so */
+    }
+  }
+
+  async function renameSession(id: string, title: string) {
+    setRenamingId(null)
+    try {
+      const updated = await api.renameSession(id, title)
+      setSessions((list) => list.map((s) => (s.id === id ? updated : s)))
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : 'Could not rename the chat.')
     }
   }
 
@@ -136,7 +151,7 @@ export default function ChatPanel({ selectedSlugs }: Props) {
     let sessionId = activeId
     if (!sessionId) {
       try {
-        const session = await api.createSession()
+        const session = await api.createSession(notebookId)
         setSessions((list) => [session, ...list])
         setActiveId(session.id)
         sessionId = session.id
@@ -188,12 +203,21 @@ export default function ChatPanel({ selectedSlugs }: Props) {
               {sessions.length === 0 && <p className="muted menu-empty">No chats yet.</p>}
               {sessions.map((s) => (
                 <div key={s.id} className={`menu-item${s.id === activeId ? ' current' : ''}`}>
-                  <button className="menu-main" role="option" aria-selected={s.id === activeId} onClick={() => void openSession(s.id)}>
-                    {s.title}
-                  </button>
-                  <button className="icon-btn danger" aria-label={`Delete chat ${s.title}`} title="Delete chat" onClick={() => void removeSession(s.id)}>
-                    <Trash2 size={15} />
-                  </button>
+                  {renamingId === s.id ? (
+                    <TitleInput className="menu-rename" value={s.title} label="Chat title" onSave={(t) => void renameSession(s.id, t)} onCancel={() => setRenamingId(null)} />
+                  ) : (
+                    <>
+                      <button className="menu-main" role="option" aria-selected={s.id === activeId} onClick={() => void openSession(s.id)}>
+                        {s.title}
+                      </button>
+                      <button className="icon-btn" aria-label={`Rename chat ${s.title}`} title="Rename chat" onClick={() => setRenamingId(s.id)}>
+                        <Pencil size={15} />
+                      </button>
+                      <button className="icon-btn danger" aria-label={`Delete chat ${s.title}`} title="Delete chat" onClick={() => void removeSession(s.id)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -282,6 +306,7 @@ export default function ChatPanel({ selectedSlugs }: Props) {
           <ArrowUp size={20} />
         </button>
       </form>
+      {problem && <MessageModal title="Something went wrong" message={problem} onClose={() => setProblem('')} />}
     </main>
   )
 }

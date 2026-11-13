@@ -4,11 +4,12 @@ import { api, type UploadResult } from '../api'
 import Modal from './Modal'
 
 interface Props {
+  notebookId: string
   onClose: () => void
   onUploaded: () => void
 }
 
-export default function AddSourcesModal({ onClose, onUploaded }: Props) {
+export default function AddSourcesModal({ notebookId, onClose, onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -30,7 +31,7 @@ export default function AddSourcesModal({ onClose, onUploaded }: Props) {
 
     setBusy(true)
     try {
-      const uploaded = await api.uploadSources(pdfs)
+      const uploaded = await api.uploadSources(notebookId, pdfs)
       const all = [...rejected, ...uploaded]
       setResults(all)
       onUploaded()
