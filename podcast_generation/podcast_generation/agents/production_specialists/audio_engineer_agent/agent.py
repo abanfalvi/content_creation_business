@@ -19,6 +19,10 @@ from ..utils import checkpointer
 with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
+# Appended to the system prompt (not formatted, so braces in it are safe).
+with open(Path(__file__).parent / "remotion_prompt.md", "r", encoding="utf-8") as f:
+    SYSTEM_PROMPT += "\n\n" + f.read()
+
 with open(Path(__file__).parent / "review_prompt.md", "r", encoding="utf-8") as f:
     REVIEW_PROMPT = f.read()
 
@@ -31,13 +35,13 @@ audio_engineer_model = ChatOpenRouter(
 
 all_tools = [
     AudioEngineerTools.listen_audio,
-    AudioEngineerTools.adjust_volume,
-    AudioEngineerTools.fade,
-    AudioEngineerTools.overlay_audio,
-    AudioEngineerTools.trim_audio,
-    AudioEngineerTools.trim_silence,
     AudioEngineerTools.generate_audio,
     AudioEngineerTools.record_rubric_scores,
+    AudioEngineerTools.exec_sbx_command,
+    AudioEngineerTools.sbx_read,
+    AudioEngineerTools.sbx_write,
+    AudioEngineerTools.sbx_upload,
+    AudioEngineerTools.sbx_download,
     AudioEngineerTools.load_available_skills,
     AudioEngineerTools.load_skill_content
 ]

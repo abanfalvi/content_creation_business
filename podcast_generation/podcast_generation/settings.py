@@ -25,6 +25,10 @@ UPLOAD_DIR = PROJECT_ROOT / "uploads"               # source PDFs as uploaded in
 APP_DB_PATH = PROJECT_ROOT / "app.db"               # web app records: sources, chat sessions, jobs, episodes
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"  # built React app, served by the API when present
 
+# E2B sandbox template the audio engineer agent edits in (Remotion pre-installed).
+# Build it once with `uv run python -m podcast_generation.sandbox_template`.
+E2B_TEMPLATE = os.environ.get("E2B_TEMPLATE", "podcast-remotion")
+
 # --- Files that live inside the package --------------------------------------------
 BOOK_LIST_PATH = PACKAGE_DIR / "book_list.json"     # the book wishlist (gitignored)
 SKILLS_DIR = PACKAGE_DIR / "skills"                 # skill files, one folder per tier

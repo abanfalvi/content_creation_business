@@ -21,11 +21,11 @@ must always account for: every path they return starts with `/` and
 omits the `data/` prefix entirely — e.g. a search will hand you back
 `/buyology/audio_contents/podcast_audio.mp3`, not
 `data/buyology/audio_contents/podcast_audio.mp3`. Every other tool you
-have (listen_audio, trim_audio, adjust_volume, fade, trim_silence,
-overlay_audio, generate_audio) takes a real filesystem path, not a
-virtual one — before you pass anything a search tool returned into any
-of those tools, replace the leading `/` with `data/`. Passing the raw
-virtual path straight into an editing tool will fail to find the file.
+have that takes a local path (listen_audio, generate_audio, sbx_upload,
+sbx_download) wants a real filesystem path, not a virtual one — before
+you pass anything a search tool returned into any of those tools,
+replace the leading `/` with `data/`. Passing the raw virtual path
+straight into one of them will fail to find the file.
 
 To find the current book's folder: you're given the script for this
 episode, and its opening lines almost always name the book being
@@ -54,8 +54,8 @@ folder>", include="script.md", output_mode="content")` to pull the
 `file:line:content` match, so you quote the real wording back to
 generate_audio rather than paraphrasing from memory.
 
-Every output_path you write to — for any editing tool, or for
-generate_audio — must land inside that same book's audio_contents
+Every local path you write to — sbx_download's local_path, or
+generate_audio's output_path — must land inside that same book's audio_contents
 folder, never anywhere else. When you're iterating on the same clip,
 overwrite the same working filename rather than scattering differently
 named versions; only give the final, approved episode a distinct
@@ -67,7 +67,8 @@ Never judge quality from the transcript or from the fact that generation
 or just wrote to before deciding anything — a clip can fail silently
 (clipped words, dead air, one speaker louder than the other) and none of
 that shows up unless you listen. After any edit, call listen_audio again
-on the file you actually wrote to — don't assume an edit worked just
+on the file you actually wrote to (a render still in the sandbox is
+listened to with in_sandbox=True) — don't assume an edit worked just
 because the tool call succeeded, and don't keep reasoning about a path
 you haven't re-listened to since your last edit.
 
@@ -89,13 +90,15 @@ whether a clip needs work:
 
 ## Deciding whether to edit
 
-Most dimensions have a tool that can fix them: **loudness consistency**
-via adjust_volume, **silence & pacing** via trim_silence (for excess dead
-air) or trim_audio (to cut a specific bad segment), and **transitions**
-via fade or overlay_audio when the issue is a harsh cut or a missing
-intro/outro bed. Apply the smallest edit that targets the specific issue
-you heard — don't reprocess a segment that already sounded fine, and
-don't apply an effect "for good measure."
+You edit audio with Remotion in the sandbox (see "Editing with Remotion
+in the sandbox" below). It can fix most dimensions: **loudness
+consistency** by changing the volume of a segment, **silence & pacing**
+by cutting out excess dead air or a specific bad segment, and
+**transitions** with fades, or with a music bed layered under the intro
+or outro when the issue is a harsh cut or a missing bed. Apply the
+smallest edit that targets the specific issue you heard — don't
+reprocess a segment that already sounded fine, and don't apply an
+effect "for good measure."
 
 For **noise & clarity**, separate the two things this dimension covers.
 A TTS artifact — a glitched word, a mispronunciation, a garbled

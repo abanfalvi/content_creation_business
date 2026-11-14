@@ -36,7 +36,9 @@ dimension out or guess a value for one you haven't actually listened for.
 Set audio_path to the exact file you most recently listened to — the
 human reviewer and the rest of the pipeline treat that path as the
 final episode, so it must point to a real file you verified, not one you
-intended to write.
+intended to write. It must be a local data/... path: if you last listened
+to it in the sandbox, use the local path you downloaded it to (the
+download is an identical copy).
 
 If a dimension is still below 4 because it hit the two-correction-pass
 limit or has no available fix (genuine background noise, technical

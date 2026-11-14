@@ -10,7 +10,7 @@ from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
 
 from langgraph.types import interrupt
-
+from e2b import Sandbox
 
 from podcast_generation.media import get_audio_segment
 from podcast_generation.settings import DATA_DIR, TMP_DIR, project_path
@@ -19,6 +19,7 @@ from .voice_tools import VoiceAgentsTools
 from .state import VoiceWorkflowState
 from .audio_engineer_agent.state import RubricScores
 from .audio_engineer_agent.agent import audio_engineer_agent
+from .audio_engineer_agent.tools import kill_sandbox
 from .lessons_learned_extractor.tools import LessonsLearnedExtracterAgentTools
 from .lessons_learned_extractor.agent import build_lessons_learned_extractor_agent, build_extraction_request
 from podcast_generation.memory.memory_store import get_shared_store
@@ -112,6 +113,15 @@ def human_review_node(state: VoiceWorkflowState) -> dict:
 def lessons_learned_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
 
+    try:
+        sandbox_id: str = audio_engineer_agent.get_state({"configurable": {"thread_id": audio_engineer_thread_id}}).values.get("sandboxId")
+        if sandbox_id:
+            kill_sandbox(sandbox_id)
+        else:
+            print("No sandbox was used, none had to be killed")
+    except Exception as error:
+        print(f"The sandbox could not be killed, reason: {error}")
+
     ll_extracter_agent = build_lessons_learned_extractor_agent(store)
 
     traces = LessonsLearnedExtracterAgentTools.extract_learnable_traces(thread_id=audio_engineer_thread_id, agent=audio_engineer_agent)
@@ -131,7 +141,7 @@ builder.add_edge("call_audio_engineer_agent", "human_review")
 builder.add_conditional_edges(
     "human_review", 
     lambda state: "lessons_learned_path" if state["status"] == "approved" else "call_audio_engineer_agent",
-    )
+)
 builder.add_edge("lessons_learned_path", END)
 
 @cache
