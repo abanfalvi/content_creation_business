@@ -123,7 +123,7 @@ class AudioEngineerTools:
         """Record your rubric assessment after listening to the current audio.
         Score each dimension 1-5 and cite what you heard as evidence for each.
         audio_path must be the finished episode as a local data/... file."""
-        # The pipeline publishes this path, so it has to exist locally (not just in the sandbox).
+        # The pipeline copies this path into the episode, so it has to exist locally (not just in the sandbox).
         if not project_path(audio_path).is_file():
             return Command(update={"messages": [ToolMessage(
                 content=(f"Not recorded: audio_path '{audio_path}' is not a local file. The final episode must be "

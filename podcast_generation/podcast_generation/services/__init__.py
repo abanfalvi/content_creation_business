@@ -1,1 +1,1 @@
-"""Application logic behind the web API: sources, chat, episode generation and publishing."""
+"""Application logic behind the web API: sources, chat, and episode generation."""

@@ -45,7 +45,7 @@ def project_path(path: str | os.PathLike) -> Path:
 
 
 def checkpoint_db(tier: str) -> Path:
-    """Path of a tier's checkpoint database (`content`, `production`, `distribution`).
+    """Path of a tier's checkpoint database (`content`, `production`).
     Creates the checkpoints folder if it is missing."""
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     return CHECKPOINT_DIR / f"{tier}_checkpoints.db"

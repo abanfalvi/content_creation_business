@@ -35,11 +35,6 @@ DIRECTOR_MODEL = "deepseek/deepseek-v4-flash-0731"
 # Production specialists
 AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.6" # google/gemini-2.5-flash-lite
 
-# Distribution specialists
-SM_WRITER_MODEL = "minimax/minimax-m3.1-flash"
-PUBLISHER_MODEL = "nvidia/nemotron-3.5-lightning"
-DISTRIBUTION_DIRECTOR_MODEL = "dots-studio/dots-3-note-preview:free"
-
 # Chat (question answering over the selected sources)
 CHAT_MODEL = "deepseek/deepseek-v4-flash-0731"
 

@@ -1,9 +1,8 @@
-import { AlertCircle, CheckCircle2, Loader2, Mic, PanelRightClose, PanelRightOpen, Send } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Mic, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Job, type Source } from '../api'
 import { POLL_FAST, POLL_IDLE, formatTime, usePolling } from '../hooks'
 import ApprovalModal from './ApprovalModal'
-import PublishModal from './PublishModal'
 
 // Jobs only change on their own while one is running. A job waiting for approval changes when the user decides,
 // and that action refreshes immediately.
@@ -22,7 +21,6 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
   // Episodes change only when a job finishes, which refreshes them below; this slow tick is just a safety net.
   const { data: episodes, refresh: refreshEpisodes } = usePolling(() => api.episodes(notebookId), POLL_IDLE, [])
   const [reviewId, setReviewId] = useState<string | null>(null)
-  const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState('')
   const prompted = useRef(new Set<string>())
 
@@ -93,9 +91,6 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
         <button className="btn action" disabled={!only || busyWithOnly} title={generateHint || 'Generate a podcast episode from the selected source'} onClick={() => void generate()}>
           <Mic size={20} /> Generate podcast
         </button>
-        <button className="btn action" title="Choose a generated episode to publish" onClick={() => setPublishing(true)}>
-          <Send size={20} /> Publish
-        </button>
       </div>
       {generateHint && <p className="muted small hint">{generateHint}</p>}
       {error && <p className="notice bad" role="alert">{error}</p>}
@@ -107,7 +102,7 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
             {visibleJobs.map((j) => (
               <li key={j.id} className={`card job ${j.status}`}>
                 <div className="card-top">
-                  <strong>{j.kind === 'generate' ? 'Episode' : 'Publishing'} · {titleOf(j.slug)}</strong>
+                  <strong>Episode · {titleOf(j.slug)}</strong>
                   <StatusIcon status={j.status} />
                 </div>
                 {j.status === 'running' && <p className="muted small">{j.activity || 'Working'}…</p>}
@@ -117,9 +112,7 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
                   </button>
                 )}
                 {j.status === 'done' && (
-                  <p className="muted small">
-                    {j.kind === 'generate' ? 'Episode ready — find it below.' : String(j.result?.message ?? 'Published.')}
-                  </p>
+                  <p className="muted small">Episode ready — find it below.</p>
                 )}
                 {j.status === 'failed' && <p className="bad small">{j.error || 'Something went wrong.'}</p>}
               </li>
@@ -141,7 +134,6 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
               <li key={e.id} className="card">
                 <div className="card-top">
                   <strong>{e.title}</strong>
-                  {e.published_at && <span className="badge good" title={e.publish_result ?? ''}><CheckCircle2 size={13} /> Published</span>}
                 </div>
                 <span className="muted small">{formatTime(e.created_at)}</span>
                 <audio controls preload="none" src={e.audio_url} />
@@ -159,9 +151,6 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
           onClose={() => setReviewId(null)}
           onDecided={() => void refreshJobs()}
         />
-      )}
-      {publishing && (
-        <PublishModal episodes={episodes} onClose={() => setPublishing(false)} onPublished={() => void refreshJobs()} />
       )}
     </aside>
   )

@@ -1,4 +1,4 @@
-"""The generate -> approve script -> approve audio -> publish flow, with scripted stand-ins for the agent graphs."""
+"""The generate -> approve script -> approve audio flow, with scripted stand-ins for the agent graphs."""
 from types import SimpleNamespace
 
 from conftest import make_pdf, nb_url, wait_for
@@ -146,33 +146,3 @@ def test_agent_errors_fail_the_job_with_a_message(client, monkeypatch):
     job_id = client.post("/api/generate", json={"source_slug": "deep_work"}).json()["id"]
     failed = wait_for(lambda: (j := job(client, job_id))["status"] == "failed" and j)
     assert failed["error"] == "POSTGRES_URI is not set."
-
-
-def test_publish_an_episode(client, monkeypatch, tmp_path):
-    from podcast_generation.services import db
-
-    audio, script = tmp_path / "e.mp3", tmp_path / "e_script.md"
-    audio.write_bytes(b"audio")
-    script.write_text(SCRIPT, encoding="utf-8")
-    db.insert("episodes", {"id": "ep1", "notebook_id": client.nb, "slug": "deep_work", "title": "Deep Work",
-                           "audio_path": str(audio), "script_path": str(script), "job_id": "j", "created_at": db.now()})
-
-    seen = {}
-
-    class Director:
-        async def ainvoke(self, value, config=None):
-            seen["input"] = value
-            return {"messages": [SimpleNamespace(content="Scheduled for Friday 9:00.")]}
-
-    monkeypatch.setattr(generation, "get_distribution_director", lambda: Director())
-
-    response = client.post("/api/episodes/ep1/publish")
-    assert response.status_code == 202
-    done = wait_for(lambda: (j := job(client, response.json()["id"]))["status"] == "done" and j)
-    assert done["result"]["message"] == "Scheduled for Friday 9:00."
-    assert seen["input"]["script_path"] == str(script)
-
-    episode = client.get(nb_url(client, "episodes")).json()[0]
-    assert episode["published_at"] and episode["publish_result"] == "Scheduled for Friday 9:00."
-    assert client.post("/api/episodes/ep1/publish").status_code == 409
-    assert client.post("/api/episodes/nope/publish").status_code == 404

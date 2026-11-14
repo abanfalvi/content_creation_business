@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "podcast-generation"
 version = "0.1.0"
-description = "Multi-agent pipeline that turns books into podcast episodes: content drafting, production, and distribution."
+description = "Multi-agent pipeline that turns books into podcast episodes: content drafting and production."
 requires-python = ">=3.13"
 dependencies = [
     "python-dotenv==1.2.2",

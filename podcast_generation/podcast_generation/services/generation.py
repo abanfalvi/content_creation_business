@@ -51,13 +51,6 @@ def get_production_workflow():
         return get_speech_gen_workflow()
 
 
-def get_distribution_director():
-    from podcast_generation.agents.distribution_specialists.director.agent import get_director_agent
-
-    with _build_lock:
-        return get_director_agent()
-
-
 # --- jobs ---------------------------------------------------------------------------------
 
 def get_job(job_id: str) -> dict | None:
@@ -65,7 +58,7 @@ def get_job(job_id: str) -> dict | None:
 
 
 def list_jobs(notebook_id: str, limit: int = 30) -> list[dict]:
-    return db.query("SELECT * FROM jobs WHERE notebook_id = ? ORDER BY created_at DESC LIMIT ?", [notebook_id, limit])
+    return db.query("SELECT * FROM jobs WHERE notebook_id = ? AND kind = 'generate' ORDER BY created_at DESC LIMIT ?", [notebook_id, limit])
 
 
 def _set(job_id: str, **fields) -> None:
@@ -110,8 +103,6 @@ def _activity(job: dict) -> str:
         return "Waiting for your review"
     if job["status"] != "running":
         return ""
-    if job["kind"] == "publish":
-        return "Writing the post and scheduling it"
     if job["stage"] == "production":
         return "Producing and editing the audio"
     step = None
@@ -275,42 +266,3 @@ def list_episodes(notebook_id: str) -> list[dict]:
 
 def get_episode(episode_id: str) -> dict | None:
     return db.one("SELECT * FROM episodes WHERE id = ?", [episode_id])
-
-
-def start_publish(episode_id: str) -> dict:
-    episode = get_episode(episode_id)
-    if episode is None:
-        raise GenerationError("Unknown episode.", 404)
-    if episode["published_at"]:
-        raise GenerationError("This episode has already been published.", 409)
-    if _active_job("publish", episode_id=episode_id):
-        raise GenerationError("This episode is already being published.", 409)
-    return _new_job("publish", episode["slug"], episode["notebook_id"], episode_id=episode_id)
-
-
-async def run_publish(job_id: str) -> None:
-    """Social post + scheduling for one episode (no human gate). Runs on the event loop."""
-    import asyncio
-
-    job = get_job(job_id)
-    episode = get_episode(job["episode_id"])
-    try:
-        # Built in a worker thread: building the sub-agents connects to the MCP servers with asyncio.run.
-        director = await asyncio.to_thread(get_distribution_director)
-        outcome = await director.ainvoke(
-            {"messages": [("user", "Prepare the podcast episode for publishing")],
-             "active_agent": "call_sm_writer_agent", "script_path": episode["script_path"]},
-            config={"configurable": {"thread_id": job_id}},
-        )
-        message = _text(outcome["messages"][-1].content)
-        db.update("episodes", "id", episode["id"], published_at=db.now(), publish_result=message)
-        _set(job_id, status="done", result={"message": message})
-    except Exception as exc:  # noqa: BLE001 - recorded on the job for the UI
-        log.exception("Publishing %s failed", job_id)
-        _set(job_id, status="failed", error=str(exc) or type(exc).__name__)
-
-
-def _text(content) -> str:
-    if isinstance(content, str):
-        return content
-    return "".join(b.get("text", "") for b in content if isinstance(b, dict))

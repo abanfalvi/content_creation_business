@@ -9,7 +9,7 @@ HOME = tempfile.mkdtemp(prefix="podcast_test_")
 os.environ["PODCAST_HOME"] = HOME
 for key in ("POSTGRES_URI", "OPIK_API_KEY", "OPIK_WORKSPACE"):
     os.environ.pop(key, None)
-for key in ("OPENROUTER_API_KEY", "TAVILY_API_KEY", "MINERU_API_KEY", "BUFFER_API_KEY", "DROPBOX"):
+for key in ("OPENROUTER_API_KEY", "TAVILY_API_KEY", "MINERU_API_KEY"):
     os.environ[key] = "test"
 
 import io  # noqa: E402

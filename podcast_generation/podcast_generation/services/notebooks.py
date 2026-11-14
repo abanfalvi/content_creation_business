@@ -62,7 +62,7 @@ def ensure_deletable(notebook_id: str) -> dict:
     if db.one("SELECT 1 AS busy FROM sources WHERE notebook_id = ? AND status = 'processing'", [notebook_id]):
         raise NotebookError("Some sources are still being processed. Wait for them to finish, then delete the notebook.", 409)
     if db.one("SELECT 1 AS busy FROM jobs WHERE notebook_id = ? AND status = 'running'", [notebook_id]):
-        raise NotebookError("An episode is still being made or published. Wait for it to finish, then delete the notebook.", 409)
+        raise NotebookError("An episode is still being made. Wait for it to finish, then delete the notebook.", 409)
     return notebook
 
 

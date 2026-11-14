@@ -226,12 +226,11 @@ def job_audio(job_id: str):
     return FileResponse(path, media_type="audio/mpeg")
 
 
-# --- episodes & publishing ----------------------------------------------------------------------
+# --- episodes ----------------------------------------------------------------------
 
 def _episode(row: dict) -> dict:
     return {
         "id": row["id"], "slug": row["slug"], "title": row["title"], "created_at": row["created_at"],
-        "published_at": row["published_at"], "publish_result": row["publish_result"],
         "audio_url": f"/api/episodes/{row['id']}/audio",
     }
 
@@ -248,10 +247,3 @@ def episode_audio(episode_id: str):
     if episode is None or not Path(episode["audio_path"]).is_file():
         raise HTTPException(404, "No audio for this episode.")
     return FileResponse(episode["audio_path"], media_type="audio/mpeg")
-
-
-@router.post("/episodes/{episode_id}/publish", status_code=202)
-async def publish(episode_id: str):
-    job = generation.start_publish(episode_id)
-    spawn(generation.run_publish(job["id"]))
-    return generation.describe(job)

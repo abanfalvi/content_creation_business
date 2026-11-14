@@ -15,13 +15,13 @@ skill_converter_model = ChatOpenRouter(
 )
 
 class SkillSchema(BaseModel):
-    agent_name: Literal['sm_writer_agent', 'publisher_agent', 'book_selection_agent', 'expert_builder_agent', 'script_drafter_agent']
+    agent_name: Literal['book_selection_agent', 'expert_builder_agent', 'script_drafter_agent']
     skill_name: str
     skill_content: str
 
 structured_model = skill_converter_model.with_structured_output(SkillSchema)  
 
-def convert_to_skill(skill_name: Literal["content_traces", "production_traces", "distribution_traces"]):
+def convert_to_skill(skill_name: Literal["content_traces", "production_traces"]):
     shared_store = get_shared_store()
     successful_traces = shared_store.search((skill_name,), filter={"type": "success"})
 
@@ -39,7 +39,7 @@ def convert_to_skill(skill_name: Literal["content_traces", "production_traces", 
           describing the workflow.
 
         The skill must be universal: write it as a generalizable workflow that
-        applies to producing/distributing an episode from ANY book, not just
+        applies to producing an episode from ANY book, not just
         the one this trace came from. Do not name the specific book, author,
         episode, or any content unique to this one trace anywhere in the
         skill_name, description, or content — describe the transferable
@@ -62,10 +62,6 @@ def convert_to_skill(skill_name: Literal["content_traces", "production_traces", 
                 elif skill_name == "production_traces":
                     os.makedirs(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}", exist_ok=True)
                     with open(SKILLS_DIR / "production_skills" / f"{outcome.skill_name}.md", "w") as f:
-                        f.write(outcome.skill_content)
-                elif skill_name == "distribution_traces":
-                    os.makedirs(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}", exist_ok=True)
-                    with open(SKILLS_DIR / "distribution_skills" / f"{outcome.agent_name}/{outcome.skill_name}.md", "w") as f:
                         f.write(outcome.skill_content)
                 shared_store.delete((skill_name,), trace.key)
                 break

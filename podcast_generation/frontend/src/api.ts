@@ -57,9 +57,8 @@ export type JobStatus = 'running' | 'awaiting_approval' | 'done' | 'failed'
 
 export interface Job {
   id: string
-  kind: 'generate' | 'publish'
+  kind: 'generate'
   slug: string
-  episode_id: string | null
   status: JobStatus
   stage: string
   gate: Gate | null
@@ -75,8 +74,6 @@ export interface Episode {
   slug: string
   title: string
   created_at: number
-  published_at: number | null
-  publish_result: string | null
   audio_url: string
 }
 
@@ -151,7 +148,6 @@ export const api = {
     request<Job>(`/jobs/${jobId}/decision`, json({ approved, feedback })),
 
   episodes: (notebookId: string) => request<Episode[]>(`/notebooks/${notebookId}/episodes`),
-  publish: (episodeId: string) => request<Job>(`/episodes/${episodeId}/publish`, { method: 'POST' }),
 }
 
 /** Ask a question and receive the answer as it is written (server-sent events over a POST). */

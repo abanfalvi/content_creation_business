@@ -3,12 +3,11 @@
 A multi-agent pipeline that turns a non-fiction book into a finished podcast episode, wrapped in a web app
 (**Level Up Lab**). You add PDF books; the app ingests them, lets you chat with the ones you select, and
 generates episodes: it invents an expert persona to "interview", plans and writes a two-voice script, checks
-that script against the book, synthesises and edits the audio, then writes the social post and
-publishes. A human approves the script and the final audio; everything else runs on its own.
+that script against the book, then synthesises and edits the audio. A human approves the script and the final audio; everything else runs on its own.
 
 - **Sources** (left): add PDFs (upload or drag and drop). They are processed automatically; tick the ones you want to work with.
 - **Chat** (middle): ask questions about the ticked sources, with the supporting passages shown. Start as many chats as you like.
-- **Studio** (right): *Generate podcast* for one source (you approve the script, then the audio) and *Publish* a generated episode.
+- **Studio** (right): *Generate podcast* for one source (you approve the script, then the audio).
 
 Built on [LangGraph](https://github.com/langchain-ai/langgraph) / [LangChain](https://github.com/langchain-ai/langchain).
 Every model call is routed through [OpenRouter](https://openrouter.ai/) and traced in
@@ -17,10 +16,10 @@ Every model call is routed through [OpenRouter](https://openrouter.ai/) and trac
 ## How it works
 
 ```
- PDF ──► INGEST ──► CONTENT ──────────────────────────► PRODUCTION ──► DISTRIBUTION
-         parse       Book Selection                      TTS per turn    Social Media Writer
-         chunk       Expert Profile Builder              Audio Engineer  review (LLM)
-         embed       Script Planner  ─► plan w/ citations  rubric score   Publisher
+ PDF ──► INGEST ──► CONTENT ──────────────────────────► PRODUCTION
+         parse       Book Selection                      TTS per turn
+         chunk       Expert Profile Builder              Audio Engineer
+         embed       Script Planner  ─► plan w/ citations  rubric score
          digest      Script Drafter  ◄─ 3 evaluators       │
                           │                               human gate
                      human gate (approve script)          (approve audio)
@@ -123,18 +122,7 @@ is a plain LangGraph graph rather than a director:
    Audio Engineer. This loops until approved.
 4. **Lessons learned**: on approval, an extractor agent distils the engineer's trace into lessons.
 
-### 4. Distribution: from audio to published post
-
-The **Distribution Director** runs fully automatically (no human gate):
-
-1. **Social Media Writer** reads the script, generates an image (OpenRouter image model), stores it in Dropbox
-   and Canva, and writes the caption.
-2. **Review** (an LLM step): the director looks at the caption and image together and decides to
-   accept, or send either back to be redone.
-3. **Publisher** looks up the show on Spotify and schedules the post through the Buffer MCP server.
-4. Lessons learned are saved as in the other tiers.
-
-### 5. How the system learns
+### 4. How the system learns
 
 - On approval, the director runs a `get_lessons_learned` step. It reads the checkpointed traces of the
   director and each specialist and saves **book-agnostic** success and failure traces to a shared store (Postgres).
@@ -147,7 +135,7 @@ The **Distribution Director** runs fully automatically (no human gate):
 
 ### State, jobs and resuming
 
-- Each tier checkpoints to its own SQLite file in `checkpoints/` (content, production, distribution, chat).
+- Each tier checkpoints to its own SQLite file in `checkpoints/` (content, production, chat).
 - The web app's own records (sources, chat list, jobs, episodes) are in `app.db`.
 - Generating an episode is a *job*. Its id is the LangGraph thread id of the director, and each specialist gets a
   child thread such as `<id>::expert_builder`. A job runs content, then production, pausing at each human gate.
@@ -174,7 +162,6 @@ podcast_generation/
       compaction.py            the compact_context_window mechanism
       utils.py                 SQLite checkpointer, get_book_path (the slug)
     production_specialists/    speech_generation.py (TTS graph), audio engineer, lessons-learned extractor
-    distribution_specialists/  director, social media writer, publisher, MCP clients (Canva, Buffer)
   book_preprocessing/          pdf_parsing, toc, chunking, context, embeddings, store (Chroma), digest, pipeline
   settings.py                  where everything lives on disk (data/, checkpoints/, skills/...) and .env loading
   media.py                     lazy ffmpeg / pydub setup
@@ -183,7 +170,7 @@ podcast_generation/
   skills/                      generated skill files, one folder per agent
   skill_converter.py           success traces -> skill files
   prune_checkpoints.py         deletes old checkpoint threads
-  services/                    the app's logic: sources, chat, generation + publishing, app database
+  services/                    the app's logic: sources, chat, episode generation, app database
   api/                         FastAPI routes (/api/...) and the app that also serves the built frontend
   book_list.json               wishlist used by the Book Selection agent (gitignored)
 frontend/                      React + TypeScript UI (Vite); `npm run build` writes frontend/dist
@@ -249,12 +236,8 @@ different root for `.env`, `data/` and the other runtime folders.
 | `TAVILY_API_KEY` | web search in book selection |
 | `MINERU_API_KEY` | PDF parsing during ingestion |
 | `OPIK_API_KEY`, `OPIK_WORKSPACE`, `OPIK_CONSOLE_LOGGING_LEVEL` | tracing (Opik is configured from the environment; the project name `podcast_generation` is set in `settings.py`) |
-| `BUFFER_API_KEY` | publishing posts via Buffer |
-| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | looking up the show and episodes on Spotify |
-| `DROPBOX` | Dropbox access token for hosting post images |
 
-Canva is authorised through an OAuth browser flow the first time publishing needs it (the token is cached in
-`.mcp_tokens.json`). The server also reads `PODCAST_HOST` / `PODCAST_PORT` (default `127.0.0.1:8000`).
+The server also reads `PODCAST_HOST` / `PODCAST_PORT` (default `127.0.0.1:8000`).
 
 ## Usage
 
@@ -269,7 +252,6 @@ uv run podcast-server        # then open http://127.0.0.1:8000
 3. **Generate a podcast.** Tick exactly one source and choose *Generate podcast*. The Studio panel shows progress and
    opens a review dialog when the script is ready: approve it, or request changes with feedback and the director will
    rework it. After approval the audio is produced and edited, and you review that the same way.
-4. **Publish.** Choose *Publish*, pick a generated episode and publish it: a social post is written and scheduled.
 
 For development, run the API (`uv run podcast-server`) and the UI dev server (`cd frontend && npm run dev`, with
 hot reload at http://localhost:5173, proxying `/api` to the API) side by side. Run the tests with `uv run pytest`.

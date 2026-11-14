@@ -36,11 +36,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS jobs (
     id          TEXT PRIMARY KEY,
     notebook_id TEXT,
-    kind        TEXT NOT NULL,            -- generate | publish
+    kind        TEXT NOT NULL,            -- generate
     slug        TEXT NOT NULL,
-    episode_id  TEXT,                     -- publish jobs: the episode being published
     status      TEXT NOT NULL,            -- running | awaiting_approval | done | failed
-    stage       TEXT NOT NULL DEFAULT '', -- generate: content | production
+    stage       TEXT NOT NULL DEFAULT '', -- content | production
     gate        TEXT,                     -- JSON: what the user is being asked to approve
     result      TEXT,                     -- JSON
     error       TEXT NOT NULL DEFAULT '',
@@ -55,9 +54,7 @@ CREATE TABLE IF NOT EXISTS episodes (
     audio_path      TEXT NOT NULL,
     script_path     TEXT NOT NULL,
     job_id          TEXT NOT NULL,
-    created_at      REAL NOT NULL,
-    published_at    REAL,
-    publish_result  TEXT
+    created_at      REAL NOT NULL
 );
 """
 
