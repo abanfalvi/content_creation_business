@@ -9,9 +9,11 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from podcast_generation.agents.qa_chat.agent import build_qa_chat_agent
 from podcast_generation.agents.qa_chat.agent import build_qa_chat_model as build_chat_model
+from podcast_generation.agents.models import CHAT_MODEL
 from podcast_generation.settings import checkpoint_db
 
 from . import db, notebooks
+from .context_usage import context_window, count_context_tokens
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +49,10 @@ def _cited_sources(text: str, known: dict[str, dict]) -> list[dict]:
     return [known[r] for r in _cited_refs(text) if r in known]
 
 
+async def _usage(messages: list) -> dict:
+    return {"used": count_context_tokens(messages), "window": await context_window(CHAT_MODEL)}
+
+
 def _thread(session_id: str) -> str:
     return f"chat:{session_id}"
 
@@ -75,7 +81,7 @@ class ChatEngine:
         self._agent = self._saver = None
 
     async def stream(self, session_id: str, message: str, source_slugs: Sequence[str]) -> AsyncIterator[dict]:
-        """Run one turn and yield UI events: status / token / sources / done / error."""
+        """Run one turn and yield UI events: status / token / sources / context / done / error."""
         config = {"configurable": {"thread_id": _thread(session_id), "source_slugs": list(source_slugs)}}
         try:
             agent = await self._ensure()
@@ -102,7 +108,9 @@ class ChatEngine:
                         if batch:
                             yield {"type": "sources", "sources": batch}
             state = await agent.aget_state(config)
-            yield {"type": "sources", "sources": _cited_sources(answer, _hits_by_ref(state.values.get("messages", [])))}
+            messages = state.values.get("messages", [])
+            yield {"type": "context", **await _usage(messages)}
+            yield {"type": "sources", "sources": _cited_sources(answer, _hits_by_ref(messages))}  # the authoritative list, right before done
             yield {"type": "done"}
         except Exception as exc:  # noqa: BLE001 - reported to the client as an error event
             log.exception("Chat turn failed")
@@ -120,6 +128,12 @@ class ChatEngine:
             elif isinstance(m, AIMessage) and not m.tool_calls and str(m.text):
                 out.append({"role": "assistant", "text": str(m.text), "sources": _cited_sources(str(m.text), _hits_by_ref(retrieved))})
         return out
+
+    async def context_usage(self, session_id: str) -> dict:
+        """Tokens the chat has used so far and the model's context window."""
+        agent = await self._ensure()
+        state = await agent.aget_state({"configurable": {"thread_id": _thread(session_id)}})
+        return await _usage((state.values or {}).get("messages", []))
 
     async def delete_thread(self, session_id: str) -> None:
         await self._ensure()

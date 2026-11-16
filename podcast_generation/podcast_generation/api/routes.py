@@ -153,6 +153,14 @@ async def session_messages(session_id: str, request: Request):
     return await _engine(request).history(session_id)
 
 
+@router.get("/chat/sessions/{session_id}/context")
+async def session_context(session_id: str, request: Request):
+    """How much of the model's context window this chat has filled: {used, window} in tokens."""
+    if chat.get_session(session_id) is None:
+        raise HTTPException(404, "No such chat.")
+    return await _engine(request).context_usage(session_id)
+
+
 @router.post("/chat/sessions/{session_id}/messages")
 async def send_message(session_id: str, body: ChatRequest, request: Request):
     """Ask a question about the selected sources. Answers stream back as server-sent events."""

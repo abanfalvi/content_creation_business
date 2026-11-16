@@ -1,8 +1,9 @@
 import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, streamChat, type ChatMessage, type Citation, type Session } from '../api'
+import { api, streamChat, type ChatMessage, type Citation, type ContextUsage, type Session } from '../api'
 import { usePersistentState } from '../hooks'
 import CitedAnswer from './CitedAnswer'
+import ContextRing from './ContextRing'
 import MessageModal from './MessageModal'
 import TitleInput from './TitleInput'
 
@@ -30,15 +31,24 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
   const [streaming, setStreaming] = useState(false)
   const [status, setStatus] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [usage, setUsage] = useState<ContextUsage | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const usageFor = useRef<string | null>(null) // the chat whose usage was requested last, so a slow answer cannot overwrite a newer chat's
 
   const noSources = selectedSlugs.length === 0
   const active = sessions.find((s) => s.id === activeId)
+
+  const loadUsage = useCallback(async (id: string) => {
+    usageFor.current = id
+    setUsage(null)
+    const loaded = await api.contextUsage(id).catch(() => null)
+    if (usageFor.current === id) setUsage(loaded)
+  }, [])
 
   const loadSessions = useCallback(async () => {
     try {
@@ -57,6 +67,7 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
       const target = list.find((s) => s.id === activeId) ?? list[0]
       if (!target) return setActiveId(null)
       setActiveId(target.id)
+      void loadUsage(target.id)
       setMessages(await api.messages(target.id).catch(() => []))
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,6 +108,7 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
     setActiveId(id)
     setMessages([])
     stickRef.current = true
+    void loadUsage(id)
     setMessages(await api.messages(id).catch(() => []))
   }
 
@@ -108,6 +120,8 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
       const session = await api.createSession(notebookId)
       setSessions((list) => [session, ...list])
       setActiveId(session.id)
+      usageFor.current = session.id
+      setUsage(null)
       setMessages([])
       setInput('')
       inputRef.current?.focus()
@@ -138,6 +152,8 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
       else {
         stopStreaming()
         setActiveId(null)
+        usageFor.current = null
+        setUsage(null)
         setMessages([])
       }
     }
@@ -156,6 +172,8 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
         const session = await api.createSession(notebookId)
         setSessions((list) => [session, ...list])
         setActiveId(session.id)
+        usageFor.current = session.id
+        setUsage(null)
         sessionId = session.id
       } catch {
         return
@@ -177,7 +195,9 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
           setStatus('')
           patchLast((m) => ({ ...m, text: m.text + event.text }))
         } else if (event.type === 'sources') patchLast((m) => ({ ...m, sources: mergeSources(m.sources, event.sources) }))
-        else if (event.type === 'error') patchLast((m) => ({ ...m, text: event.message, error: true }))
+        else if (event.type === 'context') {
+          if (usageFor.current === sessionId) setUsage({ used: event.used, window: event.window })
+        } else if (event.type === 'error') patchLast((m) => ({ ...m, text: event.message, error: true }))
       }, controller.signal)
     } catch (e) {
       if (!controller.signal.aborted) patchLast((m) => ({ ...m, text: e instanceof Error ? e.message : 'Something went wrong.', error: true }))
@@ -290,6 +310,7 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
             }
           }}
         />
+        {usage && <ContextRing usage={usage} />}
         <span className="source-count">{selectedSlugs.length} {selectedSlugs.length === 1 ? 'source' : 'sources'}</span>
         <button type="submit" className="send" aria-label="Send" disabled={streaming || noSources || !input.trim()}>
           <ArrowUp size={20} />

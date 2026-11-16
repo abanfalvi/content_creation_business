@@ -11,6 +11,7 @@ for key in ("POSTGRES_URI", "OPIK_API_KEY", "OPIK_WORKSPACE"):
     os.environ.pop(key, None)
 for key in ("OPENROUTER_API_KEY", "TAVILY_API_KEY", "MINERU_API_KEY"):
     os.environ[key] = "test"
+os.environ["CHAT_CONTEXT_WINDOW"] = "100000"  # no model-list lookup over the network
 
 import io  # noqa: E402
 import time  # noqa: E402

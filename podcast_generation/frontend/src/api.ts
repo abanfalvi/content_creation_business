@@ -80,10 +80,17 @@ export interface Episode {
   audio_url: string
 }
 
+/** Tokens a chat has used so far, and the model's context window. */
+export interface ContextUsage {
+  used: number
+  window: number
+}
+
 export type ChatEvent =
   | { type: 'status'; text: string }
   | { type: 'token'; text: string }
   | { type: 'sources'; sources: Citation[] }
+  | ({ type: 'context' } & ContextUsage)
   | { type: 'done' }
   | { type: 'error'; message: string }
 
@@ -144,6 +151,7 @@ export const api = {
   renameSession: (id: string, title: string) => request<Session>(`/chat/sessions/${id}`, patch({ title })),
   deleteSession: (id: string) => request<void>(`/chat/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => request<ChatMessage[]>(`/chat/sessions/${id}/messages`),
+  contextUsage: (id: string) => request<ContextUsage>(`/chat/sessions/${id}/context`),
 
   generate: (sourceSlug: string) => request<Job>('/generate', json({ source_slug: sourceSlug })),
   jobs: (notebookId: string) => request<Job[]>(`/notebooks/${notebookId}/jobs`),

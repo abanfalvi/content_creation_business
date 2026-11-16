@@ -166,3 +166,30 @@ def test_tokens_of_a_streaming_model_arrive_incrementally_and_exactly_once(clien
     tokens = [e["text"] for e in events if e["type"] == "token"]
     assert len(tokens) > 1 and "".join(tokens) == "Streaming works once."
     assert events[-1] == {"type": "done"}
+
+
+def test_context_usage_is_streamed_and_available_for_an_existing_chat(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, AIMessage(content="Short answer.", usage_metadata={"input_tokens": 900, "output_tokens": 100, "total_tokens": 1000}))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    url = f"/api/chat/sessions/{session['id']}"
+
+    assert client.get(f"{url}/context").json() == {"used": 0, "window": 100_000}  # nothing said yet
+
+    events = sse_events(client.post(f"{url}/messages", json={"message": "Hi", "source_slugs": ["deep_work"]}))
+    context = next(e for e in events if e["type"] == "context")
+    assert (context["used"], context["window"]) == (1000, 100_000)
+    assert client.get(f"{url}/context").json() == {"used": 1000, "window": 100_000}
+    assert client.get("/api/chat/sessions/nope/context").status_code == 404
+
+
+def test_context_tokens_use_the_reported_total_plus_an_estimate_for_what_came_after():
+    from langchain_core.messages import HumanMessage
+
+    from podcast_generation.services.context_usage import count_context_tokens
+
+    reply = AIMessage(content="x", usage_metadata={"input_tokens": 90, "output_tokens": 10, "total_tokens": 100})
+    assert count_context_tokens([HumanMessage("hi"), reply]) == 100
+    assert count_context_tokens([HumanMessage("hi"), reply, HumanMessage("a" * 40)]) == 110  # 40 chars ~ 10 tokens
+    assert count_context_tokens([HumanMessage("a" * 40)]) == 10  # no report: estimate everything
+    assert count_context_tokens([]) == 0
