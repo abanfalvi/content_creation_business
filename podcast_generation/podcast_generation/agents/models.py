@@ -36,7 +36,7 @@ DIRECTOR_MODEL = "deepseek/deepseek-v4-flash-0731"
 AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.6" # google/gemini-2.5-flash-lite
 
 # Chat (question answering over the selected sources)
-CHAT_MODEL = "deepseek/deepseek-v4-flash-0731"
+CHAT_MODEL = "baidu/ernie-5.5-flash-preview:free"
 
 # Compressor Model
 COMPRESSOR_MODEL = "inclusionai/ling-3.0-flash"

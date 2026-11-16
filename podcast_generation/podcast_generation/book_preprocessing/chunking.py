@@ -38,17 +38,13 @@ async def chunk_document(md_path: str, book_title: str, author: str):
     recursive_splitter = RecursiveCharacterTextSplitter(separators, is_separator_regex=True, chunk_size=2048, add_start_index=True)
     splits = recursive_splitter.split_documents([book_doc])
     print("Total number of splits created: ", len(splits))
-    chunks = await create_chunk_surrounding_summaries(splits)
 
     for idx, boundary in enumerate(boundaries):
-        for chunk in tqdm(chunks):
-            # print("Main chapter boundary: ", boundary[1])
-            # print("Chunk start indices: ", chunk.metadata['start_index'])
+        for chunk in tqdm(splits):
             if boundary[1] <= chunk.metadata['start_index']:
                 chunk.metadata['chapter'] = boundary[0]
             else:
-                # chunk.metadata['chapter'] = "Preamble"
                 continue
 
-    # vector_store.add_documents(splits)
+    chunks = await create_chunk_surrounding_summaries(splits)
     return chunks

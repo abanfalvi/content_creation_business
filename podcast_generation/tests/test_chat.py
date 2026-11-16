@@ -6,6 +6,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+from podcast_generation.agents.qa_chat import tools as qa_tools
 from podcast_generation.services import chat, sources
 
 
@@ -29,8 +30,8 @@ class ScriptedModel(BaseChatModel):
 
 
 HITS = [
-    {"slug": "deep_work", "title": "Deep Work", "chapter": "Rule 1", "context": "On focus.", "text": "Work deeply, without distraction."},
-    {"slug": "deep_work", "title": "Deep Work", "chapter": "Rule 2", "context": "", "text": "Embrace boredom."},
+    {"ref": "r1", "chunk_idx": 1, "kind": "chunk", "slug": "deep_work", "title": "Deep Work", "chapter": "Rule 1", "context": "On focus.", "text": "Work deeply, without distraction."},
+    {"ref": "r2", "chunk_idx": 2, "kind": "chunk", "slug": "deep_work", "title": "Deep Work", "chapter": "Rule 2", "context": "", "text": "Embrace boredom."},
 ]
 
 
@@ -50,17 +51,17 @@ def add_ready_source(client, monkeypatch):
 def use_model(monkeypatch, *messages):
     searched = []
 
-    def fake_search(slugs, query, top_n=6):
+    def fake_search(slugs, query, seen, top_n=8):
         searched.append((list(slugs), query))
-        return HITS
+        return HITS, []
 
-    monkeypatch.setattr(chat, "search_chunks", fake_search)
+    monkeypatch.setattr(qa_tools, "_search_chunks", fake_search)
     monkeypatch.setattr(chat, "build_chat_model", lambda: ScriptedModel(script=list(messages)))
     return searched
 
 
-TOOL_CALL = AIMessage(content="", tool_calls=[{"name": "search_sources", "args": {"query": "focus"}, "id": "call_1"}])
-ANSWER = AIMessage(content="Work without distraction [Deep Work, Rule 1].")
+TOOL_CALL = AIMessage(content="", tool_calls=[{"name": "semantic_search_sources", "args": {"query": "focus"}, "id": "call_1"}])
+ANSWER = AIMessage(content="Work without distraction [[r1]].")
 
 
 def test_sessions_can_be_created_listed_and_deleted(client):
@@ -91,16 +92,35 @@ def test_question_streams_an_answer_with_citations_and_is_remembered(client, mon
     assert searched == [(["deep_work"], "focus")]
 
     sources_event = next(e for e in events if e["type"] == "sources")
-    assert [s["chapter"] for s in sources_event["sources"]] == ["Rule 1", "Rule 2"]
+    assert [(s["ref"], s["chapter"], s["text"]) for s in sources_event["sources"]] == [("r1", "Rule 1", HITS[0]["text"])]
+    assert events[-2]["type"] == "sources"  # the authoritative list comes last, right before done
 
     history = client.get(f"/api/chat/sessions/{session['id']}/messages").json()
     assert [m["role"] for m in history] == ["user", "assistant"]
     assert history[0]["text"] == "How do I focus?"
     assert history[1]["text"] == ANSWER.content
-    assert [s["title"] for s in history[1]["sources"]] == ["Deep Work", "Deep Work"]
+    assert [s["ref"] for s in history[1]["sources"]] == ["r1"]  # only what the answer cites, not everything retrieved
 
     # the session is named after its first message
     assert client.get(nb_url(client, "chat/sessions")).json()[0]["title"] == "How do I focus?"
+
+
+def test_a_follow_up_can_cite_passages_from_an_earlier_turn_and_invented_refs_are_dropped(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    follow_up = AIMessage(content="More on boredom [[r2]], and something made up [[nope]].")
+    use_model(monkeypatch, TOOL_CALL, ANSWER, follow_up)
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    url = f"/api/chat/sessions/{session['id']}/messages"
+    body = {"message": "How do I focus?", "source_slugs": ["deep_work"]}
+    client.post(url, json=body)
+
+    events = sse_events(client.post(url, json={**body, "message": "And boredom?"}))
+    assert [s["ref"] for s in next(e for e in events if e["type"] == "sources")["sources"]] == ["r2"]
+    assert [s["ref"] for s in events[-2]["sources"]] == ["r2"]
+
+    history = client.get(f"/api/chat/sessions/{session['id']}/messages").json()
+    assert [m["role"] for m in history] == ["user", "assistant", "user", "assistant"]
+    assert [s["ref"] for s in history[3]["sources"]] == ["r2"]
 
 
 def test_asking_requires_a_ready_selected_source(client, monkeypatch):

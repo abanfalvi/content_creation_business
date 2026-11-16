@@ -43,10 +43,10 @@ async def preprocess_book(
         zip_url = parse_pdf(str(pdf_path), slug, f"{first}-{last}")
         if zip_url is None:
             raise RuntimeError(f"PDF parsing failed for pages {first}-{last} (check MINERU_API_KEY and the server log).")
-        save_markdown(zip_url=zip_url, output_path=md_path, append=run > 0)
+        save_markdown(zip_url=zip_url, output_path=str(md_path), append=run > 0)
 
     on_stage("Splitting into passages")
-    chunks = await chunk_document(md_path=md_path, book_title=title, author=author)
+    chunks = await chunk_document(md_path=str(md_path), book_title=title, author=author)
     on_stage("Indexing passages")
     populate_vector_db(chunks)
     # Regenerated only if the book file changed since the last digest.

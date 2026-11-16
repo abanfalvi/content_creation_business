@@ -18,6 +18,12 @@ vector_store = Chroma(
     persist_directory=str(CHROMA_DIR),
 )
 
+summaries_vector_store = Chroma(
+    collection_name="books_for_podcast_level_summaries",
+    embedding_function=embeddings,
+    persist_directory=str(CHROMA_DIR),
+)
+
 
 def populate_vector_db(
     chunks: List[Document],

@@ -140,12 +140,16 @@ audio { width: 100%; height: 36px; }
 .markdown blockquote { margin: 0 0 12px; padding-left: 14px; border-left: 3px solid var(--border); color: var(--muted); }
 .markdown table { border-collapse: collapse; margin-bottom: 12px; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px 10px; }
-.citations { margin-top: 10px; font-size: 13px; color: var(--muted); }
-.citations summary { cursor: pointer; }
-.citations ul { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
-.citations li { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
-.citations strong { color: var(--text); font-weight: 500; }
-.citations p { margin-top: 4px; }
+
+/* Inline citation badge (grey numbered bubble) and the popover with the whole passage */
+.cite-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin: 0 1px 0 3px; border: 0; border-radius: 9px; background: var(--panel-3); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1; vertical-align: 0.12em; cursor: pointer; transition: background 0.12s, color 0.12s; }
+.cite-badge:hover, .cite-badge[aria-expanded='true'] { background: #4a4d50; color: var(--text); }
+.cite-badge.plain { cursor: default; }
+.cite-pop { position: fixed; z-index: 1000; display: flex; flex-direction: column; padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45); font-size: 13px; line-height: 1.5; }
+.cite-pop-head { display: flex; align-items: baseline; gap: 8px; flex: none; }
+.cite-pop-head strong { font-weight: 500; }
+.cite-tag { flex: none; padding: 0 7px; border-radius: 8px; background: var(--panel-3); color: var(--muted); font-size: 11px; }
+.cite-pop p { margin-top: 6px; min-height: 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .composer {
   flex: none; margin: 0 clamp(12px, 4%, 48px) 16px; display: flex; align-items: flex-end; gap: 12px;

@@ -1,9 +1,8 @@
 import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { api, streamChat, type ChatMessage, type Session } from '../api'
+import { api, streamChat, type ChatMessage, type Citation, type Session } from '../api'
 import { usePersistentState } from '../hooks'
+import CitedAnswer from './CitedAnswer'
 import MessageModal from './MessageModal'
 import TitleInput from './TitleInput'
 
@@ -11,6 +10,9 @@ interface Props {
   notebookId: string
   selectedSlugs: string[]
 }
+
+/** Sources arrive in batches while the answer streams; keep one entry per passage. */
+const mergeSources = (have: Citation[] = [], more: Citation[]) => [...new Map([...have, ...more].map((s) => [s.ref, s])).values()]
 
 const SUGGESTIONS = [
   'Summarize the key ideas',
@@ -174,7 +176,7 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
         else if (event.type === 'token') {
           setStatus('')
           patchLast((m) => ({ ...m, text: m.text + event.text }))
-        } else if (event.type === 'sources') patchLast((m) => ({ ...m, sources: event.sources }))
+        } else if (event.type === 'sources') patchLast((m) => ({ ...m, sources: mergeSources(m.sources, event.sources) }))
         else if (event.type === 'error') patchLast((m) => ({ ...m, text: event.message, error: true }))
       }, controller.signal)
     } catch (e) {
@@ -261,24 +263,11 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
             ) : (
               <div key={i} className={`msg assistant${m.error ? ' error' : ''}`}>
                 {m.text ? (
-                  <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown></div>
+                  m.error ? <p>{m.text}</p> : <CitedAnswer text={m.text} sources={m.sources} streaming={last && streaming} />
                 ) : (
                   last && streaming && <p className="muted status">{status || 'Thinking…'}</p>
                 )}
                 {m.text && last && streaming && status && <p className="muted status">{status}</p>}
-                {m.sources && m.sources.length > 0 && (
-                  <details className="citations">
-                    <summary>{m.sources.length} {m.sources.length === 1 ? 'passage' : 'passages'} from your sources</summary>
-                    <ul>
-                      {m.sources.map((s, j) => (
-                        <li key={j}>
-                          <strong>{s.title}{s.chapter ? ` — ${s.chapter}` : ''}</strong>
-                          <p>{s.snippet}{s.snippet.length >= 400 ? '…' : ''}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
               </div>
             )
           })

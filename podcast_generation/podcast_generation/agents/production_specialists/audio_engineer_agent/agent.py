@@ -29,7 +29,6 @@ with open(Path(__file__).parent / "review_prompt.md", "r", encoding="utf-8") as 
 audio_engineer_model = ChatOpenRouter(
     model=AUDIO_ENGINEER_MODEL,
     temperature=0.2,
-    # api_key=OPENROUTER_API_KEY
     timeout=180000,  # ms — httpx's 5s client default isn't enough to upload a multi-MB base64 audio payload
 )
 

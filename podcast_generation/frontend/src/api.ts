@@ -36,10 +36,13 @@ export interface Session {
   updated_at: number
 }
 
+/** A passage the assistant retrieved. The answer cites it inline as `[[ref]]`. */
 export interface Citation {
+  ref: string
+  kind: 'chunk' | 'summary'
   title: string
   chapter: string
-  snippet: string
+  text: string
 }
 
 export interface ChatMessage {
