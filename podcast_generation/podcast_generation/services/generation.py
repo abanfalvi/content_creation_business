@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import shutil
@@ -6,6 +7,7 @@ import time
 
 from langgraph.types import Command
 
+from podcast_generation.book_preprocessing.digest import digest_book
 from podcast_generation.settings import DATA_DIR, project_path
 
 from . import db, notebooks, sources
@@ -29,6 +31,9 @@ _ACTIVITY = {
 
 # The agent graphs hold a Postgres store and are built once; serialise the first build.
 _build_lock = threading.Lock()
+
+# Jobs that are building their book digest right now (it takes a few minutes for a long book).
+_digesting: set[str] = set()
 
 
 class GenerationError(Exception):
@@ -105,6 +110,8 @@ def _activity(job: dict) -> str:
         return ""
     if job["stage"] == "production":
         return "Producing and editing the audio"
+    if job["id"] in _digesting:
+        return "Summarising the book"
     step = None
     # Best effort and never blocking: skip it while a worker thread is still building the graph.
     if _build_lock.acquire(blocking=False):
@@ -170,7 +177,22 @@ def advance(job_id: str, decision: dict | None = None) -> None:
         _set(job_id, status="failed", gate=None, error=str(exc) or type(exc).__name__)
 
 
+def _ensure_digest(job: dict) -> None:
+    """Build the book digest the expert builder and planner read first. It is rebuilt only if the book file changed."""
+    src = sources.get_source(job["slug"])
+    if not src["indexed"]:  # a short transcript: the agents read the whole text, a digest would only be a lossy copy
+        return
+    title = src["title"]
+    _digesting.add(job["id"])
+    try:
+        log.info(asyncio.run(digest_book(title)))
+    finally:
+        _digesting.discard(job["id"])
+
+
 def _advance(job: dict, decision: dict | None) -> None:
+    if job["stage"] == "content" and decision is None:  # not when resuming from a gate: the digest exists by then
+        _ensure_digest(job)
     while True:
         graph, config, first_input = _stage(job)
         outcome = graph.invoke(Command(resume=decision) if decision is not None else first_input, config=config)

@@ -45,6 +45,8 @@ dependencies = [
     "pypdf==7.0.1",
     "uvicorn==0.54.0",
     "e2b>=2.64.0",
+    "datalab-python-sdk>=0.10.0",
+    "yt-dlp[default]>=2026.11.23",  # YouTube sources: downloads the audio that is transcribed
 ]
 
 [dependency-groups]

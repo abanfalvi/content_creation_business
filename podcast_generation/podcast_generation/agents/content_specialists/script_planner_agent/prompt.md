@@ -78,6 +78,10 @@ to segments.
    come from text you checked yourself. Otherwise grep the book for chapter
    or part headings (for example "Chapter", "CHAPTER", or "# ") so you know
    where the chapters begin and how long they are.
+   If the book file starts with "Source: YouTube video", the source is a
+   short video transcript: there is no digest and no chapters, the speaker
+   is the author, and a [mm:ss] stamp opens the paragraph where each
+   stretch of audio begins.
    Then read the book in order, from the first line to the last, in
    windows of 100 to 150 lines. Do not skim and do not plan from the
    first chapters alone, since the strongest material is often in the

@@ -5,6 +5,7 @@ from langchain_classic.retrievers.contextual_compression import (
 )
 from typing import List, Dict
 
+from podcast_generation.book_preprocessing.source_meta import NOT_INDEXED_NOTE, is_indexed
 from podcast_generation.book_preprocessing.store import vector_store
 from podcast_generation.reranker import OpenRouterRerank
 from .utils import get_book_path
@@ -21,8 +22,11 @@ class SharedContentTools:
         book_title = runtime.state.get("book_title") or title_book
         if not book_title:
             return "[title_book] parameter should be provided because the title is not saved in state."
+        slug = get_book_path(book_title)
+        if not is_indexed(slug):  # an empty result would read as "the book does not say this"
+            return NOT_INDEXED_NOTE.format(slug=slug)
         # Filter on the slug, so a title and its filename form are interchangeable.
-        clauses = [{"book_slug": get_book_path(book_title)}]
+        clauses = [{"book_slug": slug}]
         if chapter:
             clauses.append({"chapter": chapter})
         flt = clauses[0] if len(clauses) == 1 else {"$and": clauses}

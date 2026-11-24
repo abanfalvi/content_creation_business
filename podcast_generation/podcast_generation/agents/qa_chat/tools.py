@@ -6,7 +6,9 @@ from langchain_classic.retrievers import MergerRetriever
 from langchain_core.documents import Document
 from langchain_core.messages import ToolMessage
 
+from ...book_preprocessing.source_meta import book_file, read_meta
 from ...book_preprocessing.store import summaries_vector_store, vector_store
+from ...book_preprocessing.video import split_transcript
 from ...reranker import OpenRouterRerank
 
 TOP_N = 9
@@ -137,6 +139,44 @@ def _seen(runtime: ToolRuntime) -> set[Key]:
 NO_SOURCES = "No sources are selected. Ask the user to select at least one source."
 
 
+def _unindexed_slugs(runtime: ToolRuntime) -> list[str]:
+    """Selected sources that have no search index: short transcripts, which are read whole."""
+    selected = _selected_slugs(runtime)
+    unindexed = ((runtime.config or {}).get("configurable") or {}).get("unindexed_slugs") or []
+    return [s for s in selected if s in unindexed]
+
+
+def _unindexed_note(slugs: list[str]) -> str:
+    return (
+        "These selected sources are short and have no search index, so a search cannot find anything in them. "
+        "Read each one whole with read_full_source: " + ", ".join(f"'{s}'" for s in slugs) + "."
+    ) if slugs else ""
+
+
+def _passages(slug: str) -> list[dict]:
+    """A transcript's paragraphs as citable passages, each stamped with the time its stretch of audio starts."""
+    try:
+        text = book_file(slug).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    title = read_meta(slug).get("title") or slug
+    return [
+        {"ref": _ref(slug, i, "chunk"), "chunk_idx": i, "slug": slug, "title": title, "chapter": f"from {stamp}",
+         "kind": "chunk", "context": "", "text": body}
+        for i, (stamp, body) in enumerate(split_transcript(text), start=1)
+    ]
+
+
+def _search(search: Any, slugs: list[str], unindexed: list[str]) -> tuple[str, list[dict]]:
+    """Run a search over the indexed sources only, and tell the model about the ones it has to read whole instead."""
+    note = _unindexed_note(unindexed)
+    indexed = [s for s in slugs if s not in unindexed]
+    if not indexed:
+        return note, []
+    text, hits = _render(*search(indexed))
+    return (f"{note}\n\n{text}" if note else text), hits
+
+
 class QAChatAgentTools:
 
     @tool(response_format="content_and_artifact")
@@ -146,7 +186,7 @@ class QAChatAgentTools:
         slugs = _selected_slugs(runtime)
         if not slugs:
             return NO_SOURCES, []
-        return _render(*_search_chunks(slugs, query, _seen(runtime)))
+        return _search(lambda indexed: _search_chunks(indexed, query, _seen(runtime)), slugs, _unindexed_slugs(runtime))
 
     @tool(response_format="content_and_artifact")
     @staticmethod
@@ -157,4 +197,18 @@ class QAChatAgentTools:
             return NO_SOURCES, []
         if not any(k.strip() for k in keywords):
             return "Provide at least one keyword.", []
-        return _render(*_keyword_search(slugs, query, keywords, _seen(runtime)))
+        return _search(lambda indexed: _keyword_search(indexed, query, keywords, _seen(runtime)), slugs, _unindexed_slugs(runtime))
+
+    @tool(response_format="content_and_artifact")
+    @staticmethod
+    def read_full_source(slug: str, runtime: ToolRuntime) -> tuple[str, list[dict]]:
+        """Read a whole short source (the transcript of a video) that has no search index. Use it only for the sources the search tools name, and give the source's slug. Returns every passage with its reference and the time its stretch of audio starts."""
+        readable = _unindexed_slugs(runtime)
+        if slug not in readable:
+            return (f"'{slug}' cannot be read in full. " + (f"Readable sources: {', '.join(readable)}." if readable else "No selected source can be read in full; use the search tools.")), []
+        seen = _seen(runtime)
+        passages = [p for p in _passages(slug) if _key(p) not in seen]
+        if not passages:
+            return "This source was already read in full earlier in this conversation. Use that earlier result.", []
+        body = "\n\n".join(f"[[{p['ref']}]] ({p['chapter']}) {p['text']}" for p in passages)
+        return f"Full transcript of {passages[0]['title']} ({len(passages)} passages):\n\n{body}", passages

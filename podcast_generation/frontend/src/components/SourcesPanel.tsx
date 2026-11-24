@@ -1,4 +1,4 @@
-import { AlertCircle, FileText, Loader2, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, FileText, Loader2, PanelLeftClose, PanelLeftOpen, Plus, Trash2, SquarePlay } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { Source } from '../api'
 
@@ -10,6 +10,12 @@ interface Props {
   onSelectedChange: (slugs: string[]) => void
   onAdd: () => void
   onDelete: (source: Source) => void
+}
+
+function videoMeta(s: Source): string {
+  const minutes = Math.max(1, Math.round(s.duration / 60))
+  const length = minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`
+  return s.author ? `${length} · ${s.author}` : length
 }
 
 export default function SourcesPanel({ open, onToggle, sources, selected, onSelectedChange, onAdd, onDelete }: Props) {
@@ -66,17 +72,17 @@ export default function SourcesPanel({ open, onToggle, sources, selected, onSele
         <div className="empty">
           <FileText size={28} />
           <p>Saved sources will appear here.</p>
-          <p className="muted">Add PDF books to start a conversation or make an episode.</p>
+          <p className="muted">Add PDF books or YouTube videos to start a conversation or make an episode.</p>
         </div>
       ) : (
         <ul className="source-list">
           {sources.map((s) => (
             <li key={s.slug} className={`source ${s.status}`}>
-              <FileText size={20} className="source-icon" />
+              {s.kind === 'youtube' ? <SquarePlay size={20} className="source-icon" /> : <FileText size={20} className="source-icon" />}
               <div className="source-main">
                 <span className="source-title" title={s.title}>{s.title}</span>
                 <span className="source-meta" title={s.status === 'failed' ? s.error : undefined}>
-                  {s.status === 'ready' && `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}`}
+                  {s.status === 'ready' && (s.kind === 'youtube' ? videoMeta(s) : `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}`)}
                   {s.status === 'processing' && `${s.stage || 'Processing'}…`}
                   {s.status === 'failed' && (s.error || 'Processing failed')}
                 </span>

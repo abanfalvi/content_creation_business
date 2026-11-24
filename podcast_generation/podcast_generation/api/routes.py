@@ -102,6 +102,22 @@ async def upload_sources(notebook_id: str, files: list[UploadFile]):
     return results
 
 
+class YouTubeSource(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/notebooks/{notebook_id}/sources/youtube", status_code=202)
+async def add_youtube_source(notebook_id: str, body: YouTubeSource):
+    """Add a YouTube video to a notebook. Its audio is transcribed in the background."""
+    notebooks.require_notebook(notebook_id)
+    try:
+        source = await in_thread(sources.create_video_source, notebook_id, body.url)  # asks YouTube about the video
+    except sources.SourceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    spawn(in_thread(sources.ingest, source["slug"]))
+    return source
+
+
 @router.delete("/sources/{slug}", status_code=204)
 def delete_source(slug: str):
     sources.delete_source(slug)
@@ -168,16 +184,17 @@ async def send_message(session_id: str, body: ChatRequest, request: Request):
     if session is None:
         raise HTTPException(404, "No such chat.")
     # A chat can only draw on the sources of its own notebook.
-    ready = {s["slug"] for s in sources.list_sources(session["notebook_id"]) if s["status"] == "ready"}
+    ready = {s["slug"]: s for s in sources.list_sources(session["notebook_id"]) if s["status"] == "ready"}
     slugs = [s for s in body.source_slugs if s in ready]
     if not slugs:
         raise HTTPException(422, "Select at least one processed source to ask about.")
+    unindexed = [s for s in slugs if not ready[s]["indexed"]]  # short transcripts: no search, the whole text is read
 
     chat.touch_session(session_id, first_message=body.message)
     engine = _engine(request)
 
     async def events():
-        async for event in engine.stream(session_id, body.message, slugs):
+        async for event in engine.stream(session_id, body.message, slugs, unindexed):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

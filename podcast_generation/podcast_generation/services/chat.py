@@ -80,9 +80,15 @@ class ChatEngine:
         await self._stack.aclose()
         self._agent = self._saver = None
 
-    async def stream(self, session_id: str, message: str, source_slugs: Sequence[str]) -> AsyncIterator[dict]:
-        """Run one turn and yield UI events: status / token / sources / context / done / error."""
-        config = {"configurable": {"thread_id": _thread(session_id), "source_slugs": list(source_slugs)}}
+    async def stream(
+        self, session_id: str, message: str, source_slugs: Sequence[str], unindexed_slugs: Sequence[str] = (),
+    ) -> AsyncIterator[dict]:
+        """Run one turn and yield UI events: status / token / sources / context / done / error.
+
+        `unindexed_slugs` are the selected sources that have no search index (short transcripts): the agent reads them whole."""
+        config = {"configurable": {
+            "thread_id": _thread(session_id), "source_slugs": list(source_slugs), "unindexed_slugs": list(unindexed_slugs),
+        }}
         try:
             agent = await self._ensure()
             answer = ""  # everything streamed this turn, as the UI shows it

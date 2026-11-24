@@ -5,7 +5,7 @@ A multi-agent pipeline that turns a non-fiction book into a finished podcast epi
 generates episodes: it invents an expert persona to "interview", plans and writes a two-voice script, checks
 that script against the book, then synthesises and edits the audio. A human approves the script and the final audio; everything else runs on its own.
 
-- **Sources** (left): add PDFs (upload or drag and drop). They are processed automatically; tick the ones you want to work with.
+- **Sources** (left): add PDFs (upload or drag and drop) or YouTube videos (paste a link). They are processed automatically; tick the ones you want to work with.
 - **Chat** (middle): ask questions about the ticked sources, with the supporting passages shown. Start as many chats as you like.
 - **Studio** (right): *Generate podcast* for one source (you approve the script, then the audio).
 
@@ -51,17 +51,45 @@ comes from the file name.
 | Chunk | The table of contents is matched to headers to find chapter boundaries; the text is split into ~2k-character chunks | chunks tagged with `chapter` |
 | Contextualise | An LLM writes a short summary of each chunk's neighbours, so an isolated chunk still says where it sits in the book | `context_summary` per chunk |
 | Embed | Chunks are embedded and stored in Chroma, keyed by `book_slug` (re-ingesting a book replaces its chunks) | `podcast_books_db/` |
-| Digest | A map/reduce pass over the whole book builds a line-cited map: thesis, structure, frameworks, examples, objections, verbatim author quotes. Quotes are verified against the text; the digest is skipped if the book file hasn't changed | `data/<slug>/book_digest.md` |
 
 The *slug* is the book's identity everywhere: the title lowercased with spaces, colons and commas
 turned into underscores (`get_book_path` in [utils.py](podcast_generation/agents/content_specialists/utils.py)). It names the
 `data/<slug>/` folder and filters vector search.
+
+### Adding a YouTube video
+
+Pasting a video link in *Add sources* runs `preprocess_video` (same [pipeline.py](podcast_generation/book_preprocessing/pipeline.py),
+code in [video.py](podcast_generation/book_preprocessing/video.py)). The video's title is its title, its channel is its author.
+
+| Step | What happens | Output |
+|---|---|---|
+| Download | `yt-dlp` fetches the audio; ffmpeg turns it into mono 16 kHz mp3 (~48 kbps) | temporary |
+| Split | The audio is cut into parts of about 5 minutes, at pauses found with ffmpeg's `silencedetect`, because the provider times out after about a minute per request | temporary |
+| Transcribe | The parts are sent to `x-ai/grok-stt-2.0` on OpenRouter, four at a time, and joined into paragraphs of ~90 words; each part opens with its start time (`[05:00]`), so line numbers and timestamps both work for citations | `data/<slug>/book_content.md` |
+| Decide | **Over 50,000 words**: chunked, contextualised and embedded exactly like a book. **50,000 words or fewer**: not chunked or embedded; the model reads the whole file | `data/<slug>/source.json` (`indexed`) |
+
+A short (unindexed) video changes what the agents do, because there is nothing to search:
+
+- **Chat** gets a `read_full_source` tool. The search tools skip such sources and say to read them whole; the passages it returns are
+  paragraphs with their time stamps, so answers cite them like any other passage.
+- **No digest** is built when an episode is generated; the Expert Builder's `read_book_digest` returns the whole transcript with line
+  numbers instead, the Planner reads the file as it does for a book, and `retrieve_info` says that the source has no index rather than
+  returning nothing (which would read as "the book never says this").
+
+Requirements: `OPENROUTER_API_KEY`, and Node.js or Deno on the PATH (YouTube needs a JavaScript runtime for `yt-dlp`). Videos longer than 8 hours,
+live streams, playlists and channel links are refused. The transcript is kept if a later step fails, and reused when the same video is added again.
 
 Agents reach the book in three ways: **`retrieve_info`** (semantic search: the top 75 chunks for the
 book are reranked down to 6 and returned with their context summaries), **line-range reads** of
 `book_content.md`, and **grep** over the `data/` folder.
 
 ### 2. Content: from book to approved script
+
+Before the director starts, a new generation job builds the **book digest** (`digest_book` in
+[digest.py](podcast_generation/book_preprocessing/digest.py)), because only the expert builder and the planner read it, so
+ingestion and chat don't pay for it. A map/reduce pass over the whole book builds a line-cited map: thesis,
+structure, frameworks, examples, objections, verbatim author quotes. Quotes are verified against the text, and the
+digest is skipped if the book file hasn't changed since the last one. Output: `data/<slug>/book_digest.md`.
 
 The **Content Director** ([director/](podcast_generation/agents/content_specialists/director/)) sequences the
 specialists. Each of its tool calls sets `active_agent` in the state, and a middleware swaps in the
@@ -162,7 +190,7 @@ podcast_generation/
       compaction.py            the compact_context_window mechanism
       utils.py                 SQLite checkpointer, get_book_path (the slug)
     production_specialists/    speech_generation.py (TTS graph), audio engineer, lessons-learned extractor
-  book_preprocessing/          pdf_parsing, toc, chunking, context, embeddings, store (Chroma), digest, pipeline
+  book_preprocessing/          pdf_parsing, video (yt-dlp + speech-to-text), source_meta, toc, chunking, context, embeddings, store (Chroma), digest, pipeline
   settings.py                  where everything lives on disk (data/, checkpoints/, skills/...) and .env loading
   media.py                     lazy ffmpeg / pydub setup
   reranker.py                  rerank adapter used by retrieve_info
@@ -195,7 +223,8 @@ Every agent folder follows the same pattern, with everything specific to the age
 | File | Written by |
 |---|---|
 | `book_content.md` | ingestion |
-| `book_digest.md` | ingestion |
+| `book_digest.md` | the start of a generation job (not for a short video transcript) |
+| `source.json` | ingestion: what kind of source it is and whether it is indexed |
 | `expert_persona.md` | Expert Profile Builder |
 | `planner_notes.md` | Script Planner (working notes) |
 | `script_plan.md` | Script Planner |

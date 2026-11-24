@@ -16,6 +16,13 @@ export interface Source {
   slug: string
   title: string
   filename: string
+  /** A PDF book, or a YouTube video whose audio was transcribed. */
+  kind: 'pdf' | 'youtube'
+  url: string
+  /** A video's channel. */
+  author: string
+  /** A video's length in seconds. */
+  duration: number
   pages: number
   status: SourceStatus
   stage: string
@@ -144,6 +151,8 @@ export const api = {
     files.forEach((f) => form.append('files', f))
     return request<UploadResult[]>(`/notebooks/${notebookId}/sources`, { method: 'POST', body: form })
   },
+  addYouTubeSource: (notebookId: string, url: string) =>
+    request<Source>(`/notebooks/${notebookId}/sources/youtube`, json({ url })),
   deleteSource: (slug: string) => request<void>(`/sources/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
 
   sessions: (notebookId: string) => request<Session[]>(`/notebooks/${notebookId}/chat/sessions`),

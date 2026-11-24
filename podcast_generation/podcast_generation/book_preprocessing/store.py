@@ -28,17 +28,27 @@ summaries_vector_store = Chroma(
 def populate_vector_db(
     chunks: List[Document],
     vector_store: Chroma = vector_store,
-    batch_size: int = 6,
+    batch_size: int = 64,
     pause_seconds: float = 10,
 ) -> None:
     # Re-ingesting a book replaces its old chunks instead of duplicating them.
     for slug in sorted({c.metadata["book_slug"] for c in chunks}):
         vector_store.delete(where={"book_slug": slug})
     for idx in tqdm(range(0, len(chunks), batch_size)):
-        batch = chunks[idx: idx + batch_size]
-        vector_store.add_documents(batch)
-        if idx + batch_size < len(chunks):
-            time.sleep(pause_seconds)
+        try:
+            batch = chunks[idx: idx + batch_size]
+            vector_store.add_documents(batch)
+            # if idx + batch_size < len(chunks):
+            #     time.sleep(pause_seconds)
+        except Exception as error:
+            print(f"Error occured: {error}, at {chunks[idx: idx + batch_size]}")
+            continue
+
+
+def delete_book_vectors(slug: str) -> None:
+    """Remove everything indexed for a book: its chunks and the summaries of the text around them."""
+    for store in (vector_store, summaries_vector_store):
+        store.delete(where={"book_slug": slug})
 
 
 def backfill_book_slugs(vector_store: Chroma = vector_store) -> int:

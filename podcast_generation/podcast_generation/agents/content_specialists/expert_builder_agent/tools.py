@@ -6,6 +6,8 @@ import frontmatter, os
 from typing import List
 from pathlib import Path
 
+from podcast_generation.book_preprocessing.source_meta import book_file, is_indexed
+
 from .state import ExpertBuilderState
 from ..compaction import compact_context
 from ..utils import get_book_path
@@ -204,12 +206,21 @@ class ExpertProfileTools:
     def read_book_digest(runtime: ToolRuntime[None, ExpertBuilderState]) -> str:
         "Read the book digest: a compact map of the whole book built in advance, with its thesis, structure, central frameworks, the author's voice (verbatim quotes) and how it handles objections, then for every stretch of the book a summary with line-cited claims, frameworks, examples and objections. Read it first, before any other reading. It takes no arguments."
         title = get_book_path(runtime.state.get("book_title"))
+        if not is_indexed(title):
+            # A short transcript has no digest: it is small enough to read whole, line numbers included.
+            lines = book_file(title).read_text(encoding="utf-8").splitlines(keepends=True)
+            return (
+                "This source is short (the transcript of a video), so there is no digest: below is the whole text, "
+                "with the line numbers read_book_content and grep_search use. The speaker is the author. "
+                "Verify exact names, numbers and quotes against it before you write them into the persona; "
+                "a transcript can mishear them.\n\n" + "".join(f"{i}\t{line}" for i, line in enumerate(lines, start=1))
+            )
         path = DATA_DIR / title / "book_digest.md"
         try:
             return path.read_text(encoding="utf-8")
         except OSError:
             return (
-                f"No digest exists at {path}. It has to be generated once per book (books digest --book-title ...). "
+                f"No digest exists at {path}; it is built when a podcast generation starts, so this one failed to build. "
                 "Until then, get to know the book with retrieve_info, grep_search on its headings and read_book_content, "
                 "and keep the reading targeted."
             )

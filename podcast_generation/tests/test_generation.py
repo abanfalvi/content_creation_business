@@ -1,6 +1,7 @@
 """The generate -> approve script -> approve audio flow, with scripted stand-ins for the agent graphs."""
 from types import SimpleNamespace
 
+import pytest
 from conftest import make_pdf, nb_url, wait_for
 from langgraph.types import Command
 
@@ -39,6 +40,19 @@ class ScriptedGraph:
         return SimpleNamespace(values={"active_agent": "call_script_drafter_agent"})
 
 
+@pytest.fixture(autouse=True)
+def digests(monkeypatch):
+    """No LLM calls: record which books a run asked a digest for."""
+    built = []
+
+    async def fake_digest(title, force=False):
+        built.append(title)
+        return "ok"
+
+    monkeypatch.setattr(generation, "digest_book", fake_digest)
+    return built
+
+
 def add_ready_source(client, monkeypatch, name="Deep_Work.pdf"):
     async def fake(*a, **k):
         return "ok"
@@ -56,8 +70,9 @@ def await_gate(client, job_id, kind):
     return wait_for(lambda: (j := job(client, job_id))["status"] == "awaiting_approval" and j["gate"]["type"] == kind and j)
 
 
-def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypatch, tmp_path):
+def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypatch, tmp_path, digests):
     add_ready_source(client, monkeypatch)
+    assert digests == []  # ingesting a book does not build the digest
     book_dir = DATA_DIR / "deep_work"
     book_dir.mkdir(parents=True, exist_ok=True)
     (book_dir / "script.md").write_text("OLD RUN", encoding="utf-8")  # must be archived, not reused
@@ -77,6 +92,8 @@ def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypat
     started = client.post("/api/generate", json={"source_slug": "deep_work"})
     assert started.status_code == 202
     job_id = started.json()["id"]
+    await_gate(client, job_id, "script")
+    assert digests == ["Deep Work"]  # built once, when the run starts, not again after the rejected script resumes
     assert list((book_dir / "archive").glob("*/script.md"))[0].read_text(encoding="utf-8") == "OLD RUN"
 
     # 1. script gate: rejecting needs feedback

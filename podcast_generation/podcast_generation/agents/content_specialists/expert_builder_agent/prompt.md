@@ -34,6 +34,12 @@ own wording or detail:
   voice from summaries.
 - Likely pushback: read the lines the digest points to for objections and
   limits; if it lists few, say so rather than inventing them.
+Some sources are transcripts of short videos, not books. For those,
+read_book_digest returns the whole transcript with line numbers instead of a
+digest, and retrieve_info has no index to search (it says so). Read the
+transcript through once, then use read_book_content or grep_search to check
+exact wording. The "author" is the speaker, the text is spoken language, and
+a transcript can mishear names and numbers, so check those before using them.
 The digest is machine-generated, so treat it as a map and not as a source:
 verify every specific number, name, and quote against the book before
 writing it into the persona. If the digest does not exist, the tool says so;

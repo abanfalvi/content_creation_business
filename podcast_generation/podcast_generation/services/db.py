@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS sources (
     status      TEXT NOT NULL,            -- processing | ready | failed
     stage       TEXT NOT NULL DEFAULT '',
     error       TEXT NOT NULL DEFAULT '',
-    created_at  REAL NOT NULL
+    created_at  REAL NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'pdf',  -- pdf | youtube
+    url         TEXT NOT NULL DEFAULT '',     -- youtube: the video's link
+    author      TEXT NOT NULL DEFAULT '',     -- youtube: the channel
+    duration    INTEGER NOT NULL DEFAULT 0,   -- youtube: length in seconds
+    indexed     INTEGER NOT NULL DEFAULT 1    -- 0 for a short transcript the model reads whole (no chunks, no digest)
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT PRIMARY KEY,
@@ -62,6 +67,15 @@ CREATE TABLE IF NOT EXISTS episodes (
 _NOTEBOOK_TABLES = ("sources", "sessions", "jobs", "episodes")
 DEFAULT_NOTEBOOK_TITLE = "My notebook"
 
+# Columns `sources` gained after the first release, for databases that lack them.
+_SOURCE_COLUMNS = {
+    "kind": "TEXT NOT NULL DEFAULT 'pdf'",
+    "url": "TEXT NOT NULL DEFAULT ''",
+    "author": "TEXT NOT NULL DEFAULT ''",
+    "duration": "INTEGER NOT NULL DEFAULT 0",
+    "indexed": "INTEGER NOT NULL DEFAULT 1",
+}
+
 _JSON_COLUMNS = {"gate", "result"}
 _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -90,6 +104,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         if "notebook_id" not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN notebook_id TEXT")
+
+    # Sources made before videos existed are all indexed PDFs, which is what these defaults say.
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sources)")}
+    for name, definition in _SOURCE_COLUMNS.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE sources ADD COLUMN {name} {definition}")
 
     orphans = sum(
         conn.execute(f"SELECT COUNT(*) FROM {table} WHERE notebook_id IS NULL").fetchone()[0] for table in _NOTEBOOK_TABLES

@@ -1,5 +1,5 @@
-import { AlertCircle, CheckCircle2, FileUp, Loader2 } from 'lucide-react'
-import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { AlertCircle, CheckCircle2, FileUp, Loader2, SquarePlay } from 'lucide-react'
+import { useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { api, type UploadResult } from '../api'
 import Modal from './Modal'
 
@@ -15,6 +15,9 @@ export default function AddSourcesModal({ notebookId, onClose, onUploaded }: Pro
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<UploadResult[]>([])
   const [error, setError] = useState('')
+  const [videoUrl, setVideoUrl] = useState('')
+  const [addingVideo, setAddingVideo] = useState(false)
+  const [showLink, setShowLink] = useState(false)
 
   async function upload(files: File[]) {
     if (files.length === 0 || busy) return
@@ -43,6 +46,26 @@ export default function AddSourcesModal({ notebookId, onClose, onUploaded }: Pro
     }
   }
 
+  async function addVideo(e: FormEvent) {
+    e.preventDefault()
+    const link = videoUrl.trim()
+    if (!link || busy || addingVideo) return
+    setError('')
+    setAddingVideo(true) // YouTube is asked about the video first, which takes a few seconds
+    try {
+      const source = await api.addYouTubeSource(notebookId, link)
+      setResults((prev) => [...prev, { filename: source.title, source, error: null }])
+      setVideoUrl('')
+      setShowLink(false)
+      onUploaded()
+      setTimeout(onClose, 1000) // it is on its way: get out of the way
+    } catch (err) {
+      setResults((prev) => [...prev, { filename: link, source: null, error: err instanceof Error ? err.message : 'Could not add the video.' }])
+    } finally {
+      setAddingVideo(false)
+    }
+  }
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault()
     setDragging(false)
@@ -57,6 +80,41 @@ export default function AddSourcesModal({ notebookId, onClose, onUploaded }: Pro
 
   return (
     <Modal title="Add sources" onClose={onClose}>
+      <button
+        type="button"
+        className="btn wide-btn"
+        aria-expanded={showLink}
+        onClick={() => setShowLink((open) => !open)}
+      >
+        {showLink ? <FileUp size={18} /> : <SquarePlay size={18} />} {showLink ? 'Upload PDF files instead' : 'Add YouTube link'}
+      </button>
+
+      {showLink && (
+        <form className="video-form" onSubmit={addVideo}>
+          <div className="video-row">
+            <input
+              className="text-input"
+              type="url"
+              inputMode="url"
+              autoFocus
+              aria-label="YouTube video link"
+              placeholder="https://www.youtube.com/watch?v=…"
+              value={videoUrl}
+              disabled={addingVideo}
+              onChange={(e) => setVideoUrl(e.target.value)}
+            />
+            <button className="btn primary" type="submit" disabled={addingVideo || videoUrl.trim() === ''}>
+              {addingVideo ? <Loader2 size={16} className="spin" /> : null} Add
+            </button>
+          </div>
+          <span className="muted small">
+            The audio is transcribed, so a long video takes a few minutes. A short one is read whole instead of indexed.
+          </span>
+        </form>
+      )}
+
+      {!showLink && (
+        <>
       <div
         className={`dropzone${dragging ? ' dragging' : ''}${busy ? ' busy' : ''}`}
         role="button"
@@ -88,9 +146,11 @@ export default function AddSourcesModal({ notebookId, onClose, onUploaded }: Pro
       </div>
 
       <p className="muted small">
-        Each PDF is read, indexed and summarised automatically after it is uploaded. Long books take a few minutes; you
+        Each PDF is read and indexed automatically after it is uploaded. Long books take a few minutes; you
         can keep using the app meanwhile.
       </p>
+        </>
+      )}
 
       {error && <p className="notice bad" role="alert">{error}</p>}
       {results.length > 0 && (

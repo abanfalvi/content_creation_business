@@ -12,6 +12,7 @@ SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text(encoding="utf-8"
 all_tools = [
     QAChatAgentTools.keyword_search_sources,
     QAChatAgentTools.semantic_search_sources,
+    QAChatAgentTools.read_full_source,
 ]
 
 
