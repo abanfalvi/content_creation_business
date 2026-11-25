@@ -1,4 +1,3 @@
-"""LangChain embeddings adapter around OpenRouter's embeddings endpoint."""
 import os
 import time
 
@@ -7,7 +6,11 @@ from openrouter import OpenRouter
 from openrouter.errors import TooManyRequestsResponseError
 
 
-EMBEDDING_MODEL = "sentence-transformers/all-minilm-l6-v2"
+# Passages are CHUNK_SIZE (index_version.py) characters, about 500 tokens, and an embedding model silently ignores
+# whatever is past its context: all-minilm-l6-v2 read only the first ~256 tokens, so the back of every passage was
+# never searchable. EMBEDDING_MAX_TOKENS is the model's context; tests/test_index_version.py checks a passage fits.
+EMBEDDING_MODEL = "baai/bge-m3"
+EMBEDDING_MAX_TOKENS = 8192
 
 
 class OpenRouterEmbedding(Embeddings):

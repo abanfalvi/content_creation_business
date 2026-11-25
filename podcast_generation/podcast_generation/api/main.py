@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from podcast_generation.services import chat, db, generation, notebooks, sources
+from podcast_generation.services import chat, db, generation, notebooks, reindex, sources
 from podcast_generation.settings import FRONTEND_DIST
 
 from .routes import router
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
     db.init()
     sources.recover_interrupted()
     generation.recover_interrupted()
+    reindex.warn_if_stale()
     app.state.chat = chat.ChatEngine()  # connects to its checkpoint database on first use
     try:
         yield

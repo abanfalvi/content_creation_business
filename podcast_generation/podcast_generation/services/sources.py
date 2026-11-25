@@ -9,7 +9,7 @@ from pypdf.errors import PyPdfError
 
 from podcast_generation.agents.content_specialists.utils import get_book_path
 from podcast_generation.book_preprocessing import source_meta, video
-from podcast_generation.book_preprocessing.pipeline import preprocess_book, preprocess_video
+from podcast_generation.book_preprocessing.pipeline import preprocess_book, preprocess_video, reindex_source
 from podcast_generation.settings import UPLOAD_DIR
 
 from . import db, notebooks
@@ -147,6 +147,40 @@ def ingest(slug: str) -> None:
         else:
             # A short transcript is read whole, so it has no chunks to search and no digest.
             db.update("sources", "slug", slug, status="ready", stage="", error="", indexed=int(source_meta.is_indexed(slug)))
+
+
+def stale_sources() -> list[dict]:
+    """Ready sources whose search index was built by an older embedding model or chunker.
+
+    Their chunks are not in the current vector collections, so a search finds nothing in them until `reindex`.
+    """
+    ready = db.query("SELECT * FROM sources WHERE status = 'ready' AND indexed = 1 ORDER BY created_at")
+    return [s for s in ready if source_meta.index_is_stale(s["slug"])]
+
+
+def reindex(slug: str, on_stage=lambda stage: None) -> None:
+    """Rebuild a ready source's search index from its stored text. Blocking: run it in a worker thread.
+
+    Chunking, the neighbourhood summaries (one model call per passage) and the embeddings are paid for again;
+    the PDF is not parsed again. If it fails the source stays `ready` and stale, so it can be retried; the
+    error is raised.
+    """
+    with _ingest_lock:
+        src = get_source(slug)
+        if src is None or src["status"] != "ready":
+            return
+        db.update("sources", "slug", slug, status="processing", stage="Rebuilding the search index", error="")
+
+        def stage(label: str) -> None:
+            db.update("sources", "slug", slug, stage=label)
+            on_stage(label)
+
+        try:
+            asyncio.run(reindex_source(slug, src["title"], src["author"], on_stage=stage))
+        except BaseException:
+            db.update("sources", "slug", slug, status="ready", stage="")
+            raise
+        db.update("sources", "slug", slug, status="ready", stage="", error="")
 
 
 def delete_source(slug: str) -> None:

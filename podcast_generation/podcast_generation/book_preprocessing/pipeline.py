@@ -18,8 +18,9 @@ from podcast_generation.agents.content_specialists.utils import get_book_path
 from podcast_generation.settings import DATA_DIR
 
 from .chunking import chunk_document
+from .index_version import INDEX_VERSION
 from .pdf_parsing import parse_pdf
-from .source_meta import FULL_TEXT_MAX_WORDS, book_file, count_words, read_meta, write_meta
+from .source_meta import FULL_TEXT_MAX_WORDS, book_file, count_words, read_meta, update_meta, write_meta
 from .store import delete_book_vectors, populate_vector_db
 from .video import download_audio, transcribe_audio, video_id
 
@@ -49,10 +50,29 @@ async def preprocess_book(
         #         raise RuntimeError(f"PDF parsing failed for pages {first}-{last} (check MINERU_API_KEY and the server log).")
         #     save_markdown(zip_url=zip_url, output_path=str(md_path), append=run > 0)
 
-        await parse_pdf(str(pdf_path), str(md_path))
+        await parse_pdf(str(pdf_path), str(md_path), with_bookmark=True)
     write_meta(slug, kind="pdf", title=title, indexed=True)
     await _index(md_path, title, author, on_stage)
+    update_meta(slug, index_version=INDEX_VERSION)  # only once indexing worked: a half-built index stays stale
     return f"{slug} has been preprocessed successfully!"
+
+
+async def reindex_source(
+    slug: str,
+    title: str,
+    author: str,
+    on_stage: Callable[[str], None] = lambda stage: None,
+) -> None:
+    """Chunk, summarise and embed an already ingested source again, with the current embedding model and chunker.
+
+    The text file stays as it is (no PDF parsing or transcription is paid for again); the source's chunks in
+    the current collections are replaced. Use it when `source_meta.index_is_stale(slug)`.
+    """
+    md_path = book_file(slug)
+    if not md_path.is_file():
+        raise FileNotFoundError(f"{slug} has no text file to index; add the source again.")
+    await _index(md_path, title, author, on_stage)
+    update_meta(slug, index_version=INDEX_VERSION)
 
 
 async def _index(md_path: Path, title: str, author: str, on_stage: Callable[[str], None]) -> None:
@@ -96,6 +116,7 @@ async def preprocess_video(
     write_meta(slug, kind="youtube", title=title, video_id=vid, url=url, channel=channel, words=words, indexed=indexed)
     if indexed:
         await _index(md_path, title, channel, on_stage)
+        update_meta(slug, index_version=INDEX_VERSION)
         return f"{slug}: {words} words transcribed and indexed."
     delete_book_vectors(slug)  # an earlier, longer ingestion of this slug must not stay searchable
     return f"{slug}: {words} words transcribed; short enough to read whole, so it is not indexed."

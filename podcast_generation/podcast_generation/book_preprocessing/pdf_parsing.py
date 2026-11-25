@@ -1,8 +1,8 @@
 import io
 import os
-import zipfile
+from pathlib import Path
 
-import requests
+import json
 from datalab_sdk import AsyncDatalabClient, ConvertOptions
 from typing import Literal
 
@@ -49,22 +49,22 @@ from typing import Literal
 #     except Exception as err:
 #         print(err)
 
-async def parse_pdf(book_path: str, output_path: str, parse_mode: Literal["fast", "balanced"] = "fast", with_bookmark: bool = False):
-    api_key = os.environ.get("DATALAB_API_KEY")
+async def parse_pdf(book_path: str, output_path: str, parse_mode: Literal["fast", "balanced"] = "fast", *, with_bookmark: bool = False, disable_img_extraction: bool = True):
+    api_key = os.environ.get("DATALAB_API_KEY", "")
     async with AsyncDatalabClient(api_key=api_key) as client:
         options = ConvertOptions(
             output_format="markdown",
             mode=parse_mode,
-            extras="extract_bookmark" if with_bookmark else None
+            paginate=True,
+            extras="extract_bookmarks" if with_bookmark else None,
+            disable_image_extraction=disable_img_extraction
         )
         result = await client.convert(book_path, options=options)
+        meta = result.metadata or {}
+        toc: list = meta.get("pdf_bookmarks", [])
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(result.markdown)
-
-# def save_markdown(zip_url: str, output_path: str, append: bool = False):
-#     res = requests.get(zip_url)
-#     with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
-#         md_name = next(n for n in zf.namelist() if n.endswith(".md"))
-#         mode = "ab" if append and os.path.exists(output_path) else "wb"
-#         with zf.open(md_name) as f, open(output_path, mode) as out:
-#             out.write(f.read())
+    if result.metadata:
+        Path(output_path).with_suffix(".metadata.json").write_text(
+            json.dumps(toc, indent=2), encoding="utf-8"
+        )

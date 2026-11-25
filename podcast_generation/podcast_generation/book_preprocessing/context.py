@@ -1,10 +1,11 @@
-"""LLM-written context for each chunk (summary of the neighbouring sections)."""
+"""LLM-written context for each chunk: a summary of its chapter, or of the passages around it."""
 from typing import List
 
 from langchain_core.documents import Document
 from langchain_openrouter import ChatOpenRouter
 from openrouter.errors import TooManyRequestsResponseError
 
+from .index_version import INDEX_VERSION
 from .store import summaries_vector_store, populate_vector_db
 from podcast_generation.agents.content_specialists.utils import get_book_path
 import json, time
@@ -14,8 +15,27 @@ MAX_CONCURRENCY = 8
 # These summaries are embedded in their own collection and retrieved by semantic search, and they are also
 # shown to the QA agent as the "Context" of a chunk. So each one must be self-contained, faithful and
 # written in the vocabulary a reader would use when asking about the material.
-SUMMARY_SYSTEM = """You write retrieval summaries for a non-fiction book. You are given the passages that come \
-immediately before and after one position in the book. Summarise what those passages say, so that a reader who \
+CHAPTER_SUMMARY_SYSTEM = """You write retrieval summaries for a non-fiction book. You are given the text of one \
+chapter. Summarise what that chapter says, so that a reader who has not seen it knows what the book covers there.
+
+Rules:
+- Use only the chapter text given. Never add outside knowledge, background, opinions or conclusions of your own. If \
+the text is cut off mid-sentence or mid-idea, summarise only what is actually there.
+- Cover the chapter as a whole, in the order the author presents it: what question or claim it opens with, the \
+argument, evidence or story it develops, and where it leaves the reader.
+- Be specific. Keep the author's own terms, names of people, companies, studies and frameworks, numbers, and the \
+key examples or stories, because readers will search for exactly these. Prefer "the author argues that X because Y" \
+to vague phrases like "discusses the importance of X".
+- Make it self-contained. Do not write "this chapter", "the passage", "the text" or "the following". Name the topic \
+and the book's subject explicitly instead.
+- Ignore page headers and footers, figure captions, tables of contents, indexes, citations lists and other noise. \
+If the text is only front or back matter (copyright, acknowledgments, index, ads), reply with one short \
+sentence saying so.
+- No bullet points, no headings, no \
+markdown, no preamble, and no closing remark. Output only the summary."""
+
+GRANULAR_SUMMARY_SYSTEM = """You write retrieval summaries for a non-fiction book. You are given the passages that \
+come immediately before and after one position in the book. Summarise what those passages say, so that a reader who \
 has not seen them knows what the book discusses around that point.
 
 Rules:
@@ -36,56 +56,82 @@ sentence saying so.
 markdown, no preamble, and no closing remark. Output only the summary."""
 
 
-def _summary_prompt(book_title: str, author: str, chapter: str, before: str, after: str) -> str:
-    header = f"Book: {book_title}" + (f" by {author}" if author else "") + (f"\nChapter: {chapter}" if chapter else "")
+def _header(book_title: str, author: str, chapter: str) -> str:
+    return f"Book: {book_title}" + (f" by {author}" if author else "") + (f"\nChapter: {chapter}" if chapter else "")
+
+
+def _summary_prompt(book_title: str, author: str, chapter: str, chapter_content: str) -> str:
     return (
-        f"{header}\n\n"
-        f"<before>\n{before.strip() or '(start of the book)'}\n</before>\n\n"
-        f"<after>\n{after.strip() or '(end of the book)'}\n</after>"
+        f"{_header(book_title, author, chapter)}\n\n"
+        f"<chapter_content>\n{chapter_content}\n</chapter_content>\n\n"
     )
 
 
-async def create_chunk_surrounding_summaries(chunks: List[Document]) -> List[Document]:
+def _granular_prompt(book_title: str, author: str, chunks: List[Document], idx: int) -> str:
+    last = len(chunks) - 1
+    prev_prev = chunks[idx - 2].page_content if idx - 1 > 0 else ""
+    prev = chunks[idx - 1].page_content if idx > 0 else ""
+    nxt = chunks[idx + 1].page_content if idx < last else ""
+    nxt_nxt = chunks[idx + 2].page_content if idx + 1 < last else ""
+    chapter = chunks[idx].metadata.get("chapter", "")
+    return (
+        f"{_header(book_title, author, chapter or '')}\n\n"
+        f"<before>\n{(f'{prev_prev}\n{prev}').strip() or '(start of the book)'}\n</before>\n\n"
+        f"<after>\n{(f'{nxt}\n{nxt_nxt}').strip() or '(end of the book)'}\n</after>"
+    )
+
+
+async def create_chunk_surrounding_summaries(chunks: List[Document], granular: bool = False) -> List[Document]:
+    """Write a context summary for every chunk.
+
+    `granular` summarises the two passages on either side of each chunk (one prompt per chunk); otherwise the
+    whole chapter a chunk belongs to is summarised once and shared by every chunk in it (one prompt per chapter).
+    """
     book_title = chunks[0].metadata.get("Title", "")
     author = chunks[0].metadata.get("Author", "")
-    chapter = chunks[0].metadata.get("chapter", "")
 
-    model = ChatOpenRouter(model="z-ai/glm-5.3-flash", temperature=0.3, max_tokens=4096, max_retries=2)
+    model = ChatOpenRouter(model="z-ai/glm-5.3-flash", temperature=0.3, max_tokens=8192, max_retries=2)
+
+    # Each prompt produces one summary; a group is every chunk that summary is written to.
+    groups: dict = {}
     prompts: list = []
-    last = len(chunks) - 1
-    for idx in range(len(chunks)):
-        prev_prev = chunks[idx - 2].page_content if idx - 1 > 0 else ""
-        prev = chunks[idx - 1].page_content if idx > 0 else ""
-        nxt = chunks[idx + 1].page_content if idx < last else ""
-        nxt_nxt = chunks[idx + 2].page_content if idx + 1 < last else ""
-        prompt = _summary_prompt(
-            book_title, author, chunks[idx].metadata.get("chapter", "") or "",
-            before=f"{prev_prev}\n{prev}", after=f"{nxt}\n{nxt_nxt}",
-        )
-        prompts.append([("system", SUMMARY_SYSTEM), ("user", prompt)])
+    if granular:
+        for chunk_idx, chunk in enumerate(chunks):
+            groups[chunk_idx] = [(chunk_idx, chunk)]
+            prompts.append([("system", GRANULAR_SUMMARY_SYSTEM), ("user", _granular_prompt(book_title, author, chunks, chunk_idx))])
+    else:
+        for chunk_idx, chunk in enumerate(chunks):
+            groups.setdefault(chunk.metadata.get("chapter") or "", []).append((chunk_idx, chunk))
+        for ch, members in groups.items():
+            prompts.append([("system", CHAPTER_SUMMARY_SYSTEM), ("user", _summary_prompt(
+                book_title, author, ch,
+                "\n\n".join(chunk.page_content for _, chunk in members),
+            ))])
 
     results = await model.abatch(prompts, config={"max_concurrency": MAX_CONCURRENCY}, return_exceptions=True)
 
     summary_docs: list[Document] = []
-    sleep_time = [10, 20, 30]
-    for chunk_idx, summary in enumerate(results):
+    for prompt_idx, (key, summary) in enumerate(zip(groups, results)):
         if isinstance(summary, BaseException):
             for attempt in range(3):
                 try:
-                    summary = await model.ainvoke(prompts[chunk_idx])
-                except:
+                    summary = await model.ainvoke(prompts[prompt_idx])
+                except TooManyRequestsResponseError as err:
                     if attempt == 2:
                         summary = None
                         break
                     else:
-                        time.sleep(sleep_time[attempt])
-                        continue
+                        retry_after = err.raw_response.headers.get("Retry-After")
+                        delay = float(retry_after) if retry_after else 2 ** (attempt + 1)
+                        print(f"Rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{3})")
+                        time.sleep(delay)
             if summary is None:
-                print(f"[Error occured during context generation] - chunk {chunk_idx} skipped. Error:\n {summary!r}")
+                print(f"[Error occured during context generation] - {key!r} skipped.")
                 continue
-        chunks[chunk_idx].metadata['context_summary'] = summary.content
-        chunks[chunk_idx].metadata['id'] = chunk_idx
         response = summary.content if isinstance(summary.content, str) else json.dumps(summary.content)
-        summary_docs.append(Document(page_content=response, metadata={"id": chunk_idx, "Title": book_title, "book_slug": get_book_path(book_title), "Author": author, "chapter": chapter}))
+        for chunk_idx, chunk in groups[key]:
+            chunk.metadata['context_summary'] = summary.content
+            chunk.metadata['id'] = chunk_idx
+            summary_docs.append(Document(page_content=response, metadata={"id": chunk_idx, "Title": book_title, "book_slug": get_book_path(book_title), "Author": author, "chapter": chunk.metadata.get("chapter"), "index_version": INDEX_VERSION}))
     populate_vector_db(summary_docs, summaries_vector_store)
     return chunks

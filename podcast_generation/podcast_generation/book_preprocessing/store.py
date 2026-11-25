@@ -1,4 +1,8 @@
-"""Chroma vector store for ingested books, plus the batched loader."""
+"""Chroma vector store for ingested books, plus the batched loader.
+
+The collections are named after the index version (index_version.py), so a new embedding model or chunker
+starts empty instead of mixing its vectors with the old ones; collections of an older version stay on disk, unused.
+"""
 from podcast_generation.settings import CHROMA_DIR
 import time
 from typing import List
@@ -10,16 +14,17 @@ from tqdm import tqdm
 from podcast_generation.agents.content_specialists.utils import get_book_path
 
 from .embeddings import OpenRouterEmbedding
+from .index_version import collection_name
 
 embeddings = OpenRouterEmbedding()
 vector_store = Chroma(
-    collection_name="books_for_podcast",
+    collection_name=collection_name("books_for_podcast"),
     embedding_function=embeddings,
     persist_directory=str(CHROMA_DIR),
 )
 
 summaries_vector_store = Chroma(
-    collection_name="books_for_podcast_level_summaries",
+    collection_name=collection_name("books_for_podcast_level_summaries"),
     embedding_function=embeddings,
     persist_directory=str(CHROMA_DIR),
 )

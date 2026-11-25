@@ -31,6 +31,11 @@ def write_meta(slug: str, **fields) -> dict:
     return fields
 
 
+def update_meta(slug: str, **fields) -> dict:
+    """Add facts to the source's existing ones (unlike write_meta, which starts over)."""
+    return write_meta(slug, **{**read_meta(slug), **fields})
+
+
 def delete_meta(slug: str) -> None:
     meta_file(slug).unlink(missing_ok=True)
 
@@ -38,6 +43,17 @@ def delete_meta(slug: str) -> None:
 def is_indexed(slug: str) -> bool:
     """Whether the source has chunks in the vector store (and so a digest and search)."""
     return bool(read_meta(slug).get("indexed", True))
+
+
+def index_is_stale(slug: str) -> bool:
+    """Whether the source's chunks were not built by the current embedding model and chunker.
+
+    Only an indexed source can be stale, and it needs its text file to be rebuilt. A source indexed before
+    versions were recorded has no `index_version`, so it counts as stale.
+    """
+    from .index_version import INDEX_VERSION
+
+    return is_indexed(slug) and book_file(slug).is_file() and read_meta(slug).get("index_version") != INDEX_VERSION
 
 
 def count_words(text: str) -> int:
