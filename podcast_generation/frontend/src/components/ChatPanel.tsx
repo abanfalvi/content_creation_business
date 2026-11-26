@@ -1,10 +1,11 @@
-import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowUp, BookOpen, ChevronDown, MessageSquare, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, streamChat, type ChatMessage, type Citation, type ContextUsage, type Session } from '../api'
 import { usePersistentState } from '../hooks'
 import CitedAnswer from './CitedAnswer'
 import ContextRing from './ContextRing'
 import MessageModal from './MessageModal'
+import PreferencesModal from './PreferencesModal'
 import TitleInput from './TitleInput'
 
 interface Props {
@@ -18,7 +19,7 @@ const mergeSources = (have: Citation[] = [], more: Citation[]) => [...new Map([.
 const SUGGESTIONS = [
   'Summarize the key ideas',
   'What are the main arguments?',
-  'Give me three insights worth turning into an episode',
+  'What are the most important ideas, and what examples back them up?',
 ]
 
 export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
@@ -31,6 +32,7 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
   const [streaming, setStreaming] = useState(false)
   const [status, setStatus] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
   const [usage, setUsage] = useState<ContextUsage | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -245,10 +247,14 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
             </div>
           )}
         </div>
+        <button className="icon-btn" aria-label="Answer preferences" title="What I remember about how you like answers" onClick={() => setPrefsOpen(true)}>
+          <SlidersHorizontal size={18} />
+        </button>
         <button className="btn ghost" onClick={() => void newChat()}>
           <Plus size={18} /> New chat
         </button>
       </header>
+      {prefsOpen && <PreferencesModal notebookId={notebookId} onClose={() => setPrefsOpen(false)} />}
 
       <div
         className="messages"

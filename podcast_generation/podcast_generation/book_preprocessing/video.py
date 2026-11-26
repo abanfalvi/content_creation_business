@@ -20,6 +20,7 @@ HEADER_END = "\n---\n"   # the transcript's header ends here; the speech follows
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "www.youtu.be"}
 _ID = re.compile(r"^[\w-]{11}$")
 _TIME = re.compile(r"^\[((?:\d+:)?\d{2}:\d{2})\]\s*")
+_STAMP_LINE = re.compile(r"^\[((?:\d+:)?\d{2}:\d{2})\]", re.M)
 _YDL_OPTS = {
     "quiet": True,
     "noprogress": True,
@@ -68,6 +69,19 @@ def clean_title(title: str) -> str:
 def _message(exc: Exception) -> str:
     text = re.sub(r"\x1b\[[0-9;]*m", "", str(exc)).strip().removeprefix("ERROR:").strip()
     return text[:300] or type(exc).__name__
+
+
+def stamp_seconds(stamp: str) -> int:
+    """Seconds in a transcript time stamp: "05:30" -> 330, "1:02:03" -> 3723."""
+    seconds = 0
+    for part in stamp.split(":"):
+        seconds = seconds * 60 + int(part)
+    return seconds
+
+
+def timestamp_url(url: str, seconds: int) -> str:
+    """The video's link opened at the given second."""
+    return f"{url}{'&' if '?' in url else '?'}t={int(seconds)}s"
 
 
 def clock(seconds: float) -> str:
@@ -237,6 +251,16 @@ def build_transcript(title: str, channel: str, url: str, duration: float, parts:
         for i, paragraph in enumerate(paragraphs(text)):
             lines += [f"[{clock(start)}] {paragraph}" if i == 0 else paragraph, ""]
     return "\n".join(lines)
+
+
+def is_transcript(markdown: str) -> bool:
+    """Whether the text is a transcript file made by `build_transcript` (not a book)."""
+    return markdown.startswith("# ") and "\nSource: YouTube video" in markdown.split(HEADER_END, 1)[0]
+
+
+def stamp_offsets(markdown: str) -> list[tuple[int, str]]:
+    """(character offset, time stamp) of every time stamp a transcript opens a part with, in order."""
+    return [(m.start(), m.group(1)) for m in _STAMP_LINE.finditer(markdown)]
 
 
 def split_transcript(markdown: str) -> list[tuple[str, str]]:

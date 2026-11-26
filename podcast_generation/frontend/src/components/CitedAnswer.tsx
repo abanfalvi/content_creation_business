@@ -136,6 +136,7 @@ function CitationBadge({ n, source }: { n: number; source?: Citation }) {
           <div className="cite-pop-head">
             <strong>{label(source)}</strong>
             {source.kind === 'summary' && <span className="cite-tag">Summary</span>}
+            {source.url && <a className="cite-link" href={source.url} target="_blank" rel="noreferrer">Watch ↗</a>}
           </div>
           <p>{source.text}</p>
         </div>,

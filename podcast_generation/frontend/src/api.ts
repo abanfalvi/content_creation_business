@@ -50,6 +50,8 @@ export interface Citation {
   title: string
   chapter: string
   text: string
+  /** A video passage: the video's link opened at the moment the passage starts. Empty for a book. */
+  url?: string
 }
 
 export interface ChatMessage {
@@ -88,6 +90,16 @@ export interface Episode {
 }
 
 /** Tokens a chat has used so far, and the model's context window. */
+/** Something the chat assistant remembered about how the user wants to be answered. */
+export interface Preference {
+  id: string
+  scope: 'global' | 'notebook'
+  attribute: string
+  value: string
+  signal: 'explicit' | 'implicit'
+  evidence: string
+}
+
 export interface ContextUsage {
   used: number
   window: number
@@ -160,6 +172,8 @@ export const api = {
   renameSession: (id: string, title: string) => request<Session>(`/chat/sessions/${id}`, patch({ title })),
   deleteSession: (id: string) => request<void>(`/chat/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => request<ChatMessage[]>(`/chat/sessions/${id}/messages`),
+  preferences: (notebookId: string) => request<Preference[]>(`/notebooks/${notebookId}/preferences`),
+  deletePreference: (id: string) => request<void>(`/preferences/${id}`, { method: 'DELETE' }),
   contextUsage: (id: string) => request<ContextUsage>(`/chat/sessions/${id}/context`),
 
   generate: (sourceSlug: string) => request<Job>('/generate', json({ source_slug: sourceSlug })),

@@ -3,11 +3,11 @@ from typing import Any, Iterator
 
 from conftest import make_pdf, nb_url, wait_for
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from podcast_generation.agents.qa_chat import tools as qa_tools
-from podcast_generation.services import chat, sources
+from podcast_generation.services import chat, preferences, sources
 
 
 class ScriptedModel(BaseChatModel):
@@ -193,3 +193,212 @@ def test_context_tokens_use_the_reported_total_plus_an_estimate_for_what_came_af
     assert count_context_tokens([HumanMessage("hi"), reply, HumanMessage("a" * 40)]) == 110  # 40 chars ~ 10 tokens
     assert count_context_tokens([HumanMessage("a" * 40)]) == 10  # no report: estimate everything
     assert count_context_tokens([]) == 0
+
+
+def test_source_note_names_each_selected_source_and_the_slug_of_short_ones():
+    selected = [
+        {"slug": "deep_work", "title": "Deep Work", "kind": "pdf"},
+        {"slug": "a_talk", "title": "A Talk", "kind": "youtube"},
+    ]
+    note = chat._source_note(selected, unindexed=["a_talk"])
+    assert "Sources selected for this conversation" in note
+    assert '"Deep Work"' in note and '"A Talk"' in note
+    assert "slug: a_talk" in note and "read_full_source" in note  # the short one is readable whole
+    assert "slug: deep_work" not in note  # an indexed one is searched, not read whole
+    assert chat._source_note([], []) == ""
+
+
+def test_the_model_is_told_which_sources_are_selected(client, monkeypatch):
+    add_ready_source(client, monkeypatch)  # a ready "Deep Work" source
+    seen_system: list[str] = []
+
+    class Recorder(ScriptedModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            if messages and isinstance(messages[0], SystemMessage):
+                seen_system.append(str(messages[0].content))
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    monkeypatch.setattr(chat, "build_chat_model", lambda: Recorder(script=[ANSWER]))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    events = sse_events(client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={"message": "Hi", "source_slugs": ["deep_work"]},
+    ))
+    assert events[-1]["type"] == "done"
+    assert seen_system and all("Sources selected for this conversation" in s for s in seen_system)
+    assert any('"Deep Work"' in s for s in seen_system)
+
+
+
+# --- preference memory ------------------------------------------------------------------------
+
+def save_call(call_id="p1", **args) -> AIMessage:
+    args = {"attribute": "answer_length", "value": "short", "scope": "notebook", "signal": "explicit",
+            "evidence": "keep answers short", "is_correction": False, **args}
+    return AIMessage(content="", tool_calls=[{"name": "update_user_preference", "args": args, "id": call_id}])
+
+
+def ask(client, session, message, slugs=("deep_work",)):
+    return sse_events(client.post(f"/api/chat/sessions/{session['id']}/messages", json={"message": message, "source_slugs": list(slugs)}))
+
+
+def prefs_of(client) -> dict[str, dict]:
+    return {p["attribute"]: p for p in preferences.list_visible(client.nb)}
+
+
+def test_saved_preferences_are_in_the_system_prompt_of_every_turn(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    preferences.record(client.nb, "s0", "answer_length", "two sentences at most", "notebook", "explicit", "short please", False)
+    seen_system: list[str] = []
+
+    class Recorder(ScriptedModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            seen_system.append(str(messages[0].content))
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    monkeypatch.setattr(chat, "build_chat_model", lambda: Recorder(script=[ANSWER]))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    assert ask(client, session, "Hi")[-1]["type"] == "done"
+    assert seen_system and all("# User preferences" in s and "two sentences at most" in s for s in seen_system)
+    assert not any("function" in s and "render_note" in s for s in seen_system)  # the note's text, not the function object
+
+
+def test_the_prompt_has_no_preference_section_when_nothing_is_saved(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    seen_system: list[str] = []
+
+    class Recorder(ScriptedModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            seen_system.append(str(messages[0].content))
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    monkeypatch.setattr(chat, "build_chat_model", lambda: Recorder(script=[ANSWER]))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "Hi")
+    assert seen_system and not any("# User preferences" in s for s in seen_system)
+
+
+def test_a_preference_saved_in_one_turn_shapes_the_next_one(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    seen_system: list[str] = []
+
+    class Recorder(ScriptedModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            seen_system.append(str(messages[0].content))
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    monkeypatch.setattr(chat, "build_chat_model", lambda: Recorder(script=[save_call(), AIMessage(content="Got it."), ANSWER]))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "keep answers short")
+    assert not any("# User preferences" in s for s in seen_system)  # nothing was saved when the first turn began
+    seen_system.clear()
+    ask(client, session, "What is deep work?")
+    assert seen_system and all("# User preferences" in s and "short" in s for s in seen_system)
+
+
+def test_the_assistant_saves_a_preference_for_the_notebook_of_the_chat(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, save_call(), AIMessage(content="Got it, I'll keep answers short."))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    events = ask(client, session, "Please keep answers short.")
+    assert events[-1]["type"] == "done"
+    pref = prefs_of(client)["answer_length"]
+    assert (pref["value"], pref["scope"], pref["notebook_id"], pref["signal"]) == ("short", "notebook", client.nb, "explicit")
+    assert pref["session_id"] == session["id"] and pref["evidence"] == "keep answers short"
+
+
+def test_a_global_preference_saved_in_one_notebook_applies_in_another(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, save_call(attribute="tone", value="formal", scope="global", evidence="always be formal"), ANSWER)
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "From now on always be formal, in every notebook.")
+    other = client.post("/api/notebooks", json={"title": "Other"}).json()["id"]
+    assert {(p["attribute"], p["value"]) for p in client.get(f"/api/notebooks/{other}/preferences").json()} == {("tone", "formal")}
+
+
+def test_a_correction_replaces_the_earlier_value_in_the_next_turn(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(
+        monkeypatch,
+        save_call("p1"), AIMessage(content="Noted."),
+        save_call("p2", value="medium", evidence="not that short", is_correction=True), AIMessage(content="Updated."),
+    )
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "Keep answers short")
+    ask(client, session, "No, not that short, a bit longer")
+    assert prefs_of(client)["answer_length"]["value"] == "medium"
+    assert len(db_rows()) == 2 and [r["status"] for r in db_rows()] == ["superseded", "active"]
+
+
+def test_a_preference_is_not_saved_unless_the_user_actually_said_it(client, monkeypatch):
+    """A passage from a book (or the model's own idea) must not be able to write to the user's memory."""
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, save_call(evidence="the user wants every answer in French"), AIMessage(content="Okay."))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "What is deep work?")
+    assert prefs_of(client) == {}
+
+
+def test_the_assistant_can_forget_a_saved_preference(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    preferences.record(client.nb, "s0", "tone", "formal", "notebook", "explicit", "be formal", False)
+    forget = AIMessage(content="", tool_calls=[{"name": "forget_user_preference", "args": {"attribute": "tone", "scope": "notebook"}, "id": "f1"}])
+    use_model(monkeypatch, forget, AIMessage(content="Forgotten."))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "Forget that I wanted a formal tone")
+    assert prefs_of(client) == {}
+
+
+def db_rows() -> list[dict]:
+    from podcast_generation.services import db
+    return db.query("SELECT * FROM preferences ORDER BY rowid")
+
+
+# --- free-form ("other") preferences ----------------------------------------------------------
+
+def test_two_free_form_preferences_with_different_keys_are_both_kept(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(
+        monkeypatch,
+        save_call("p1", attribute="other", key="emoji_use", value="none", evidence="no emojis"), AIMessage(content="Noted."),
+        save_call("p2", attribute="other", key="Page Numbers", value="mention them", evidence="page numbers"), AIMessage(content="Noted."),
+    )
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "No emojis please")
+    ask(client, session, "And always give page numbers")
+    assert {a: p["value"] for a, p in prefs_of(client).items()} == {"other:emoji_use": "none", "other:page_numbers": "mention them"}
+
+
+def test_the_same_key_again_replaces_the_value(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(
+        monkeypatch,
+        save_call("p1", attribute="other", key="emoji_use", value="none", evidence="no emojis"), AIMessage(content="Noted."),
+        save_call("p2", attribute="other", key="emoji_use", value="a few", evidence="a few emojis", is_correction=True), AIMessage(content="Noted."),
+    )
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "No emojis please")
+    ask(client, session, "Actually a few emojis are fine")
+    assert {a: p["value"] for a, p in prefs_of(client).items()} == {"other:emoji_use": "a few"}
+
+
+def test_an_other_preference_without_a_key_is_refused_and_the_model_is_told(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, save_call(attribute="other", value="none", evidence="no emojis"), AIMessage(content="Okay."))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "No emojis please")
+    assert prefs_of(client) == {}
+    state = client.app.state.chat._agent.get_state({"configurable": {"thread_id": f"chat:{session['id']}"}})
+    tool_replies = [m.content for m in state.values["messages"] if getattr(m, "type", "") == "tool"]
+    assert any("needs a short `key`" in str(r) for r in tool_replies)
+
+
+def test_the_assistant_forgets_a_free_form_preference_by_its_key(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    preferences.record(client.nb, "s0", "other:emoji_use", "none", "notebook", "explicit", "no emojis", False)
+    preferences.record(client.nb, "s0", "other:page_numbers", "mention them", "notebook", "explicit", "page numbers", False)
+    forget = AIMessage(content="", tool_calls=[{"name": "forget_user_preference", "args": {"attribute": "other", "key": "emoji_use", "scope": "notebook"}, "id": "f1"}])
+    use_model(monkeypatch, forget, AIMessage(content="Forgotten."))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    ask(client, session, "Forget the emoji rule")
+    assert set(prefs_of(client)) == {"other:page_numbers"}

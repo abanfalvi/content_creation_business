@@ -76,7 +76,7 @@ def test_update_meta_adds_to_what_is_there_and_write_meta_starts_over():
 def test_ingesting_a_book_records_the_version_once_it_is_indexed(monkeypatch):
     events = []
 
-    async def fake_parse(path, out):
+    async def fake_parse(path, out, **kwargs):
         open(out, "w", encoding="utf-8").write("text")
 
     async def fake_index(md_path, title, author, on_stage):

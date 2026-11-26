@@ -1,15 +1,16 @@
 import hashlib, uuid
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Sequence, Literal
 
 from langchain.tools import ToolRuntime, tool
 from langchain_classic.retrievers import MergerRetriever
 from langchain_core.documents import Document
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from ...book_preprocessing.source_meta import book_file, read_meta
 from ...book_preprocessing.store import summaries_vector_store, vector_store
-from ...book_preprocessing.video import split_transcript
+from ...book_preprocessing.video import split_transcript, stamp_seconds, timestamp_url
 from ...reranker import OpenRouterRerank
+from ...services import preferences
 
 TOP_N = 9
 
@@ -24,6 +25,14 @@ def _ref(slug: str, chunk_idx: Any, kind: str) -> str:
     """
     book = hashlib.sha1(str(slug).encode("utf-8")).hexdigest()[:5]
     return f"{book}-{chunk_idx}" + ("s" if kind == "summary" else "")
+
+
+def _watch_url(slug: str, seconds: Any) -> str:
+    """Link to the moment of a video where a passage starts; empty for a book (its chunks carry no start time)."""
+    if seconds is None:
+        return ""
+    url = read_meta(slug).get("url") or ""
+    return timestamp_url(url, int(seconds)) if url else ""
 
 
 def _hit(d: Document) -> dict[str, Any]:
@@ -42,6 +51,7 @@ def _hit(d: Document) -> dict[str, Any]:
         "kind": kind,
         "context": m.get("context_summary", "") or "",
         "text": d.page_content,
+        "url": _watch_url(slug, m.get("start_seconds")),
     }
 
 
@@ -159,10 +169,11 @@ def _passages(slug: str) -> list[dict]:
         text = book_file(slug).read_text(encoding="utf-8")
     except OSError:
         return []
-    title = read_meta(slug).get("title") or slug
+    meta = read_meta(slug)
+    title, url = meta.get("title") or slug, meta.get("url") or ""
     return [
         {"ref": _ref(slug, i, "chunk"), "chunk_idx": i, "slug": slug, "title": title, "chapter": f"from {stamp}",
-         "kind": "chunk", "context": "", "text": body}
+         "kind": "chunk", "context": "", "text": body, "url": timestamp_url(url, stamp_seconds(stamp)) if url else ""}
         for i, (stamp, body) in enumerate(split_transcript(text), start=1)
     ]
 
@@ -212,3 +223,43 @@ class QAChatAgentTools:
             return "This source was already read in full earlier in this conversation. Use that earlier result.", []
         body = "\n\n".join(f"[[{p['ref']}]] ({p['chapter']}) {p['text']}" for p in passages)
         return f"Full transcript of {passages[0]['title']} ({len(passages)} passages):\n\n{body}", passages
+
+    @tool
+    @staticmethod
+    def update_user_preference(
+        attribute: Literal["answer_length", "tone", "format", "jargon_level", "detail_level",
+                           "audience", "language", "quote_policy", "other"],
+        value: str,
+        scope: Literal["notebook", "global"],
+        signal: Literal["explicit", "implicit"],
+        evidence: str,            # the user's wording that supports it
+        is_correction: bool,      # "no, shorter", "I said X not Y"
+        runtime: ToolRuntime,
+        key: str = "",
+    ) -> str:
+        """Save how the user wants answers written, so it applies in later turns and chats. `evidence` must be words the user wrote in this conversation. For attribute "other", `key` is required: a short snake_case name for what the preference is about (for example "emoji_use"); each key is remembered separately."""
+        name = preferences.resolve_attribute(attribute, key)
+        if name is None:
+            return "Not saved: attribute 'other' needs a short `key` naming what the preference is about, for example 'emoji_use'."
+        conf = (runtime.config or {}).get("configurable") or {}
+        said = " ".join(str(m.content) for m in (runtime.state or {}).get("messages", []) if isinstance(m, HumanMessage)).lower()
+        if not evidence.strip() or evidence.strip().lower() not in said:
+            return "Not saved: `evidence` must be words the user wrote in this conversation."
+        problem = preferences.record(conf.get("notebook_id", ""), conf.get("session_id", ""), name, value, scope, signal, evidence, is_correction)
+        return problem or ("Updated user preference." if is_correction else "Saved user preference.")
+
+    @tool
+    @staticmethod
+    def forget_user_preference(
+        attribute: Literal["answer_length", "tone", "format", "jargon_level", "detail_level",
+                           "audience", "language", "quote_policy", "other"],
+        scope: Literal["notebook", "global"],
+        runtime: ToolRuntime,
+        key: str = "",
+    ) -> str:
+        """Forget a saved preference the user no longer wants. For attribute "other", give the same `key` it was saved with."""
+        name = preferences.resolve_attribute(attribute, key)
+        if name is None:
+            return "Nothing forgotten: attribute 'other' needs the `key` the preference was saved with."
+        conf = (runtime.config or {}).get("configurable") or {}
+        return preferences.retract(conf.get("notebook_id", ""), name, scope) or "User preference has been retracted."

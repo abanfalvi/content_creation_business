@@ -12,6 +12,7 @@ from podcast_generation.agents.content_specialists.utils import get_book_path
 from podcast_generation.book_preprocessing.context import create_chunk_surrounding_summaries
 from podcast_generation.book_preprocessing.index_version import CHUNK_SIZE, INDEX_VERSION
 from podcast_generation.book_preprocessing.toc import extract_toc_titles, match_toc_to_headers
+from podcast_generation.book_preprocessing.video import is_transcript, stamp_offsets, stamp_seconds
 
 _PAGE_MARKER_RE = re.compile(r"\{(\d+)\}-{8,}\n\n")
 _FRONT_MATTER_RE = re.compile(
@@ -69,6 +70,17 @@ def index_start_from_bookmarks(md: str, bookmarks: list[dict]) -> list[tuple[int
     return sorted(starts.items())
 
 
+def _label_by_time(chunks: list[Document], transcript: str) -> None:
+    """Give each chunk of a transcript the last time stamp at or before it: `chapter` "from 05:00" and `start_seconds`."""
+    marks = stamp_offsets(transcript)
+    offsets = [offset for offset, _ in marks]
+    for chunk in chunks:
+        i = bisect_right(offsets, chunk.metadata["start_index"]) - 1
+        stamp = marks[i][1] if i >= 0 else "00:00"
+        chunk.metadata["chapter"] = f"from {stamp}"
+        chunk.metadata["start_seconds"] = stamp_seconds(stamp)
+
+
 async def chunk_document(md_path: str, book_title: str, author: str):
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -96,6 +108,11 @@ async def chunk_document(md_path: str, book_title: str, author: str):
     recursive_splitter = RecursiveCharacterTextSplitter(separators, is_separator_regex=True, chunk_size=CHUNK_SIZE, add_start_index=True)
     splits = recursive_splitter.split_documents([book_doc])
     print("Total number of splits created: ", len(splits))
+
+    # A video transcript has no chapters: each chunk is labelled with the time stamp it falls under.
+    if is_transcript(content):
+        _label_by_time(splits, content)
+        return await create_chunk_surrounding_summaries(splits)
 
     # The PDF's own outline places chapters exactly; the Markdown scan is the fallback for sources without one.
     starts: list[tuple[int, dict[str, Any]]] = []

@@ -6,7 +6,7 @@ them. Sources, chats, jobs and episodes each carry the `notebook_id` of the note
 import logging
 from pathlib import Path
 
-from . import db
+from . import db, preferences
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ def delete_notebook(notebook_id: str) -> None:
     ensure_deletable(notebook_id)
     for source in sources.list_sources(notebook_id):
         sources.delete_source(source["slug"])
+    preferences.delete_for_notebook(notebook_id)
     for episode in db.query("SELECT audio_path, script_path FROM episodes WHERE notebook_id = ?", [notebook_id]):
         for path in (episode["audio_path"], episode["script_path"]):
             try:

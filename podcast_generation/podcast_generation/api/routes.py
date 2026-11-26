@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
-from podcast_generation.services import chat, generation, notebooks, sources
+from podcast_generation.services import chat, generation, notebooks, preferences, sources
 
 router = APIRouter(prefix="/api")
 
@@ -194,12 +194,27 @@ async def send_message(session_id: str, body: ChatRequest, request: Request):
     engine = _engine(request)
 
     async def events():
-        async for event in engine.stream(session_id, body.message, slugs, unindexed):
+        async for event in engine.stream(session_id, body.message, [ready[s] for s in slugs], session["notebook_id"], unindexed):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
         events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+
+# --- saved answer preferences ------------------------------------------------------------------
+
+@router.get("/notebooks/{notebook_id}/preferences")
+def list_preferences(notebook_id: str):
+    """What the chat assistant has remembered about how to answer in this notebook (its own and the global ones)."""
+    notebooks.require_notebook(notebook_id)
+    return preferences.list_visible(notebook_id)
+
+
+@router.delete("/preferences/{preference_id}", status_code=204)
+def delete_preference(preference_id: str):
+    if not preferences.remove(preference_id):
+        raise HTTPException(404, "No such preference.")
 
 
 # --- generating episodes ----------------------------------------------------------------------

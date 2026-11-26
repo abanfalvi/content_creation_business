@@ -132,6 +132,9 @@ async def create_chunk_surrounding_summaries(chunks: List[Document], granular: b
         for chunk_idx, chunk in groups[key]:
             chunk.metadata['context_summary'] = summary.content
             chunk.metadata['id'] = chunk_idx
-            summary_docs.append(Document(page_content=response, metadata={"id": chunk_idx, "Title": book_title, "book_slug": get_book_path(book_title), "Author": author, "chapter": chunk.metadata.get("chapter"), "index_version": INDEX_VERSION}))
+            summary_meta = {"id": chunk_idx, "Title": book_title, "book_slug": get_book_path(book_title), "Author": author, "chapter": chunk.metadata.get("chapter"), "index_version": INDEX_VERSION}
+            if "start_seconds" in chunk.metadata:  # a video: the summary can be cited at the same moment
+                summary_meta["start_seconds"] = chunk.metadata["start_seconds"]
+            summary_docs.append(Document(page_content=response, metadata=summary_meta))
     populate_vector_db(summary_docs, summaries_vector_store)
     return chunks

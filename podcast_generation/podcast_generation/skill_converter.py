@@ -15,7 +15,7 @@ skill_converter_model = ChatOpenRouter(
 )
 
 class SkillSchema(BaseModel):
-    agent_name: Literal['book_selection_agent', 'expert_builder_agent', 'script_drafter_agent']
+    agent_name: Literal['book_selection_agent', 'expert_builder_agent', 'script_drafter_agent', 'audio_engineer_agent']
     skill_name: str
     skill_content: str
 
@@ -57,11 +57,11 @@ def convert_to_skill(skill_name: Literal["content_traces", "production_traces"])
 
                 if skill_name == "content_traces":
                     os.makedirs(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}", exist_ok=True)
-                    with open(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}/{outcome.skill_name}.md", "w") as f:
+                    with open(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}" / f"{outcome.skill_name}.md", "w") as f:
                         f.write(outcome.skill_content)
                 elif skill_name == "production_traces":
                     os.makedirs(SKILLS_DIR / "content_skills" / f"{outcome.agent_name}", exist_ok=True)
-                    with open(SKILLS_DIR / "production_skills" / f"{outcome.skill_name}.md", "w") as f:
+                    with open(SKILLS_DIR / "production_skills" / f"{outcome.agent_name}" / f"{outcome.skill_name}.md", "w") as f:
                         f.write(outcome.skill_content)
                 shared_store.delete((skill_name,), trace.key)
                 break

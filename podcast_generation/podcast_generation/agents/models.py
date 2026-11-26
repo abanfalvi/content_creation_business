@@ -40,6 +40,7 @@ TRANSCRIPTION_MODEL = "x-ai/grok-stt-2.0"
 
 # Chat (question answering over the selected sources)
 CHAT_MODEL = "baidu/ernie-5.5-flash-preview:free"
+FALLBACK_MODEL = "z-ai/glm-5.3-flash"
 
 # Compressor Model
 COMPRESSOR_MODEL = "inclusionai/ling-3.1-flash"

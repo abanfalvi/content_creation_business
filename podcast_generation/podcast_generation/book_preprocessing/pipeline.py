@@ -72,7 +72,12 @@ async def reindex_source(
     if not md_path.is_file():
         raise FileNotFoundError(f"{slug} has no text file to index; add the source again.")
     await _index(md_path, title, author, on_stage)
-    update_meta(slug, index_version=INDEX_VERSION)
+    _mark_indexed(slug)
+
+
+def _mark_indexed(slug: str) -> None:
+    """Record that the index was built with the current chunker (only once indexing worked: a half-built index stays stale)."""
+    update_meta(slug, index_version=INDEX_VERSION, **({"timed_chunks": True} if read_meta(slug).get("kind") == "youtube" else {}))
 
 
 async def _index(md_path: Path, title: str, author: str, on_stage: Callable[[str], None]) -> None:
@@ -116,7 +121,7 @@ async def preprocess_video(
     write_meta(slug, kind="youtube", title=title, video_id=vid, url=url, channel=channel, words=words, indexed=indexed)
     if indexed:
         await _index(md_path, title, channel, on_stage)
-        update_meta(slug, index_version=INDEX_VERSION)
+        _mark_indexed(slug)
         return f"{slug}: {words} words transcribed and indexed."
     delete_book_vectors(slug)  # an earlier, longer ingestion of this slug must not stay searchable
     return f"{slug}: {words} words transcribed; short enough to read whole, so it is not indexed."

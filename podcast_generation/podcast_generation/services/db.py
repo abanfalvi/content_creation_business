@@ -63,6 +63,26 @@ CREATE TABLE IF NOT EXISTS episodes (
 );
 """
 
+_PREFERENCES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS preferences (
+    id            TEXT PRIMARY KEY,
+    scope         TEXT NOT NULL CHECK (scope IN ('global','notebook')),
+    notebook_id   TEXT,                      -- NULL if global
+    attribute     TEXT NOT NULL,             -- from a fixed vocabulary
+    value         TEXT NOT NULL,
+    signal        TEXT NOT NULL CHECK (signal IN ('explicit','implicit')),
+    evidence      TEXT NOT NULL DEFAULT '',  -- the user's own words that justified it
+    session_id    TEXT,                      -- provenance
+    hits          INTEGER NOT NULL DEFAULT 1,-- implicit: times observed
+    status        TEXT NOT NULL CHECK (status IN ('active','superseded','retracted')),
+    superseded_by TEXT,                      -- nullable
+    created_at    REAL NOT NULL,
+    CHECK ((scope = 'global') = (notebook_id IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_pref
+    ON preferences(scope, COALESCE(notebook_id,''), attribute) WHERE status = 'active';
+"""
+
 # Tables whose rows belong to a notebook.
 _NOTEBOOK_TABLES = ("sources", "sessions", "jobs", "episodes")
 DEFAULT_NOTEBOOK_TITLE = "My notebook"
@@ -90,6 +110,7 @@ def init(path=None) -> None:
         _conn = sqlite3.connect(path or APP_DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(_SCHEMA)
+        _conn.executescript(_PREFERENCES_SCHEMA)
         _migrate(_conn)
         _conn.commit()
 
@@ -114,6 +135,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     orphans = sum(
         conn.execute(f"SELECT COUNT(*) FROM {table} WHERE notebook_id IS NULL").fetchone()[0] for table in _NOTEBOOK_TABLES
     )
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(preferences)")}
+    if "signal" not in columns and conn.execute("SELECT COUNT(*) FROM preferences").fetchone()[0] == 0:
+        conn.execute("DROP TABLE preferences")  # the first draft of the table, never filled: recreate it in its final shape
+        conn.executescript(_PREFERENCES_SCHEMA)
     if not orphans:
         return
     row = conn.execute("SELECT id FROM notebooks ORDER BY created_at LIMIT 1").fetchone()
@@ -172,6 +197,18 @@ def execute(sql: str, params: Iterable = ()) -> None:
         assert _conn is not None, "db.init() has not been called"
         _conn.execute(sql, tuple(params))
         _conn.commit()
+
+def execute_many(statements: list[tuple[str, Iterable]]) -> None:
+    """Run several statements as one unit: all are saved, or none are."""
+    with _lock:
+        assert _conn is not None, "db.init() has not been called"
+        try:
+            for sql, params in statements:
+                _conn.execute(sql, tuple(params))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+            raise
 
 
 def insert(table: str, values: dict[str, Any]) -> None:

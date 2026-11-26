@@ -219,7 +219,7 @@ def test_a_transcript_already_made_for_the_same_video_is_reused_but_not_for_anot
 def write_short_source(slug="how_focus_works_a_talk"):
     source_meta.book_file(slug).parent.mkdir(parents=True, exist_ok=True)
     source_meta.book_file(slug).write_text(TRANSCRIPT, encoding="utf-8")
-    source_meta.write_meta(slug, kind="youtube", title="How Focus Works: A Talk", indexed=False)
+    source_meta.write_meta(slug, kind="youtube", title="How Focus Works: A Talk", url=URL, indexed=False)
 
 
 def ask(client, monkeypatch, *messages, question="What is focus?"):
@@ -358,3 +358,58 @@ def test_a_database_from_before_videos_gets_the_new_columns_and_its_books_stay_i
     row = db.one("SELECT * FROM sources WHERE slug = 'deep_work'")
     assert (row["kind"], row["url"], row["author"], row["duration"], row["indexed"]) == ("pdf", "", "", 0, 1)
     db.init(path)  # running it again is harmless
+
+
+# --- citing a moment of a video -----------------------------------------------------------------
+
+def test_time_stamps_become_seconds_and_a_link_to_that_moment():
+    assert [video.stamp_seconds(s) for s in ("00:00", "05:30", "1:02:03")] == [0, 330, 3723]
+    assert video.timestamp_url(URL, 330) == URL + "&t=330s"
+    assert video.timestamp_url("https://youtu.be/abc", 5) == "https://youtu.be/abc?t=5s"
+
+
+def test_a_transcript_is_told_from_a_book_and_its_stamps_are_found():
+    assert video.is_transcript(TRANSCRIPT) and not video.is_transcript("# A Book\n\nSource: nowhere\n\n---\n\nText")
+    assert [s for _, s in video.stamp_offsets(TRANSCRIPT)] == ["00:00", "05:00"]
+
+
+def test_each_chunk_of_a_transcript_is_labelled_with_the_stamp_before_it():
+    from langchain_core.documents import Document
+
+    from podcast_generation.book_preprocessing.chunking import _label_by_time
+
+    second = TRANSCRIPT.index("[05:00]")
+    chunks = [Document(page_content="x", metadata={"start_index": i}) for i in (0, second - 5, second, second + 10)]
+    _label_by_time(chunks, TRANSCRIPT)
+    assert [(c.metadata["chapter"], c.metadata["start_seconds"]) for c in chunks] == [
+        ("from 00:00", 0), ("from 00:00", 0), ("from 05:00", 300), ("from 05:00", 300),
+    ]
+
+
+def test_a_video_hit_links_to_its_moment_and_a_book_hit_does_not():
+    from langchain_core.documents import Document
+
+    source_meta.write_meta("timed_talk", kind="youtube", title="Timed Talk", url=URL)
+    video_hit = qa_tools._hit(Document(page_content="p", metadata={
+        "book_slug": "timed_talk", "id": 4, "start_index": 0, "chapter": "from 05:00", "start_seconds": 300}))
+    book_hit = qa_tools._hit(Document(page_content="p", metadata={"book_slug": "some_book", "id": 4, "start_index": 0}))
+    assert video_hit["url"] == URL + "&t=300s" and book_hit["url"] == ""
+
+
+def test_a_short_source_read_whole_cites_a_link_to_the_moment(client, monkeypatch):
+    ref = qa_tools._ref("how_focus_works_a_talk", 2, "chunk")
+    events = ask(client, monkeypatch, READ, AIMessage(content=f"Rest matters [[{ref}]]."))
+    cited = [e for e in events if e["type"] == "sources" and e["sources"]][-1]["sources"]
+    assert [(c["chapter"], c["url"]) for c in cited] == [("from 05:00", URL + "&t=300s")]
+
+
+def test_a_video_indexed_without_stamps_is_stale_until_rebuilt():
+    from podcast_generation.book_preprocessing.index_version import INDEX_VERSION
+
+    slug = "stamp_talk"
+    source_meta.book_file(slug).parent.mkdir(parents=True, exist_ok=True)
+    source_meta.book_file(slug).write_text(TRANSCRIPT, encoding="utf-8")
+    source_meta.write_meta(slug, kind="youtube", indexed=True, index_version=INDEX_VERSION)
+    assert source_meta.index_is_stale(slug)
+    pipeline._mark_indexed(slug)
+    assert not source_meta.index_is_stale(slug)

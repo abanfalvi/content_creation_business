@@ -5,7 +5,7 @@ from podcast_generation.settings import DATA_DIR
 
 BOOK_FILENAME = "book_content.md"
 META_FILENAME = "source.json"
-FULL_TEXT_MAX_WORDS = 75_000  # at most this many words: no chunking, the model reads the whole file
+FULL_TEXT_MAX_WORDS = 50_000  # at most this many words: no chunking, the model reads the whole file
 
 
 def book_file(slug: str) -> Path:
@@ -53,7 +53,12 @@ def index_is_stale(slug: str) -> bool:
     """
     from .index_version import INDEX_VERSION
 
-    return is_indexed(slug) and book_file(slug).is_file() and read_meta(slug).get("index_version") != INDEX_VERSION
+    if not (is_indexed(slug) and book_file(slug).is_file()):
+        return False
+    meta = read_meta(slug)
+    # A video indexed before its chunks carried time stamps cannot be cited at a moment: rebuild it.
+    untimed_video = meta.get("kind") == "youtube" and not meta.get("timed_chunks")
+    return meta.get("index_version") != INDEX_VERSION or untimed_video
 
 
 def count_words(text: str) -> int:

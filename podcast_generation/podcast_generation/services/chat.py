@@ -14,6 +14,7 @@ from podcast_generation.settings import checkpoint_db
 
 from . import db, notebooks
 from .context_usage import context_window, count_context_tokens
+from . import preferences
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def _hits_by_ref(messages: list) -> dict[str, dict]:
                         "title": h.get("title", ""),
                         "chapter": h.get("chapter", ""),
                         "text": h.get("text", ""),
+                        "url": h.get("url", ""),
                     })
     return known
 
@@ -55,6 +57,29 @@ async def _usage(messages: list) -> dict:
 
 def _thread(session_id: str) -> str:
     return f"chat:{session_id}"
+
+
+def _source_note(selected: Sequence[dict], unindexed: Sequence[str]) -> str:
+    """A short system-prompt note naming the selected sources, so the model can fetch one it has not seen yet.
+
+    The list is rebuilt every turn from the current selection, so it always matches what the user has ticked.
+    """
+    if not selected:
+        return ""
+    short = set(unindexed)
+    lines = []
+    for s in selected:
+        kind = "video transcript" if s.get("kind") == "youtube" else "book"
+        if s["slug"] in short:
+            lines.append(f'- "{s["title"]}" ({kind}; no search index, so read it whole with read_full_source, slug: {s["slug"]})')
+        else:
+            lines.append(f'- "{s["title"]}" ({kind})')
+    return (
+        "# Sources selected for this conversation\n"
+        "The user has selected the sources below. When you need something from one that is not already in the "
+        "conversation above, retrieve it with the search tools; read the short ones (marked below) whole with "
+        "read_full_source using the given slug.\n" + "\n".join(lines)
+    )
 
 
 class ChatEngine:
@@ -81,13 +106,20 @@ class ChatEngine:
         self._agent = self._saver = None
 
     async def stream(
-        self, session_id: str, message: str, source_slugs: Sequence[str], unindexed_slugs: Sequence[str] = (),
+        self, session_id: str, message: str, selected_sources: Sequence[dict], notebook_id, unindexed_slugs: Sequence[str] = (),
     ) -> AsyncIterator[dict]:
         """Run one turn and yield UI events: status / token / sources / context / done / error.
 
-        `unindexed_slugs` are the selected sources that have no search index (short transcripts): the agent reads them whole."""
+        `selected_sources` are the ready source rows (slug, title, kind) the user has selected; `unindexed_slugs`
+        are the subset with no search index (short transcripts), which the agent reads whole."""
         config = {"configurable": {
-            "thread_id": _thread(session_id), "source_slugs": list(source_slugs), "unindexed_slugs": list(unindexed_slugs),
+            "thread_id": _thread(session_id),
+            "source_slugs": [s["slug"] for s in selected_sources],
+            "unindexed_slugs": list(unindexed_slugs),
+            "source_note": _source_note(selected_sources, unindexed_slugs),
+            "notebook_id": notebook_id,
+            "session_id": session_id,
+            "preference_note": preferences.render_note(notebook_id)
         }}
         try:
             agent = await self._ensure()
