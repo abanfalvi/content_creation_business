@@ -79,11 +79,6 @@ def stamp_seconds(stamp: str) -> int:
     return seconds
 
 
-def timestamp_url(url: str, seconds: int) -> str:
-    """The video's link opened at the given second."""
-    return f"{url}{'&' if '?' in url else '?'}t={int(seconds)}s"
-
-
 def clock(seconds: float) -> str:
     hours, rest = divmod(int(seconds), 3600)
     minutes, secs = divmod(rest, 60)

@@ -50,8 +50,6 @@ export interface Citation {
   title: string
   chapter: string
   text: string
-  /** A video passage: the video's link opened at the moment the passage starts. Empty for a book. */
-  url?: string
 }
 
 export interface ChatMessage {

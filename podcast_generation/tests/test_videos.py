@@ -362,10 +362,8 @@ def test_a_database_from_before_videos_gets_the_new_columns_and_its_books_stay_i
 
 # --- citing a moment of a video -----------------------------------------------------------------
 
-def test_time_stamps_become_seconds_and_a_link_to_that_moment():
+def test_time_stamps_become_seconds():
     assert [video.stamp_seconds(s) for s in ("00:00", "05:30", "1:02:03")] == [0, 330, 3723]
-    assert video.timestamp_url(URL, 330) == URL + "&t=330s"
-    assert video.timestamp_url("https://youtu.be/abc", 5) == "https://youtu.be/abc?t=5s"
 
 
 def test_a_transcript_is_told_from_a_book_and_its_stamps_are_found():
@@ -386,21 +384,11 @@ def test_each_chunk_of_a_transcript_is_labelled_with_the_stamp_before_it():
     ]
 
 
-def test_a_video_hit_links_to_its_moment_and_a_book_hit_does_not():
-    from langchain_core.documents import Document
-
-    source_meta.write_meta("timed_talk", kind="youtube", title="Timed Talk", url=URL)
-    video_hit = qa_tools._hit(Document(page_content="p", metadata={
-        "book_slug": "timed_talk", "id": 4, "start_index": 0, "chapter": "from 05:00", "start_seconds": 300}))
-    book_hit = qa_tools._hit(Document(page_content="p", metadata={"book_slug": "some_book", "id": 4, "start_index": 0}))
-    assert video_hit["url"] == URL + "&t=300s" and book_hit["url"] == ""
-
-
-def test_a_short_source_read_whole_cites_a_link_to_the_moment(client, monkeypatch):
+def test_a_short_source_read_whole_cites_the_moment_it_starts(client, monkeypatch):
     ref = qa_tools._ref("how_focus_works_a_talk", 2, "chunk")
     events = ask(client, monkeypatch, READ, AIMessage(content=f"Rest matters [[{ref}]]."))
     cited = [e for e in events if e["type"] == "sources" and e["sources"]][-1]["sources"]
-    assert [(c["chapter"], c["url"]) for c in cited] == [("from 05:00", URL + "&t=300s")]
+    assert [c["chapter"] for c in cited] == ["from 05:00"]
 
 
 def test_a_video_indexed_without_stamps_is_stale_until_rebuilt():

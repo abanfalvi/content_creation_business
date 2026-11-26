@@ -41,7 +41,6 @@ def _hits_by_ref(messages: list) -> dict[str, dict]:
                         "title": h.get("title", ""),
                         "chapter": h.get("chapter", ""),
                         "text": h.get("text", ""),
-                        "url": h.get("url", ""),
                     })
     return known
 

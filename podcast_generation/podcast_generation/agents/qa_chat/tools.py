@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 from ...book_preprocessing.source_meta import book_file, read_meta
 from ...book_preprocessing.store import summaries_vector_store, vector_store
-from ...book_preprocessing.video import split_transcript, stamp_seconds, timestamp_url
+from ...book_preprocessing.video import split_transcript
 from ...reranker import OpenRouterRerank
 from ...services import preferences
 
@@ -27,14 +27,6 @@ def _ref(slug: str, chunk_idx: Any, kind: str) -> str:
     return f"{book}-{chunk_idx}" + ("s" if kind == "summary" else "")
 
 
-def _watch_url(slug: str, seconds: Any) -> str:
-    """Link to the moment of a video where a passage starts; empty for a book (its chunks carry no start time)."""
-    if seconds is None:
-        return ""
-    url = read_meta(slug).get("url") or ""
-    return timestamp_url(url, int(seconds)) if url else ""
-
-
 def _hit(d: Document) -> dict[str, Any]:
     m = d.metadata
     slug, chunk_idx = m.get("book_slug", ""), m.get("id", "")
@@ -51,7 +43,6 @@ def _hit(d: Document) -> dict[str, Any]:
         "kind": kind,
         "context": m.get("context_summary", "") or "",
         "text": d.page_content,
-        "url": _watch_url(slug, m.get("start_seconds")),
     }
 
 
@@ -170,10 +161,10 @@ def _passages(slug: str) -> list[dict]:
     except OSError:
         return []
     meta = read_meta(slug)
-    title, url = meta.get("title") or slug, meta.get("url") or ""
+    title = meta.get("title") or slug
     return [
         {"ref": _ref(slug, i, "chunk"), "chunk_idx": i, "slug": slug, "title": title, "chapter": f"from {stamp}",
-         "kind": "chunk", "context": "", "text": body, "url": timestamp_url(url, stamp_seconds(stamp)) if url else ""}
+         "kind": "chunk", "context": "", "text": body}
         for i, (stamp, body) in enumerate(split_transcript(text), start=1)
     ]
 
