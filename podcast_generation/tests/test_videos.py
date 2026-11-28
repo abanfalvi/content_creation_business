@@ -1,4 +1,5 @@
 """YouTube sources: link handling, transcripts, ingestion, and how QA chat and the agents read a short transcript."""
+import re
 import sqlite3
 from types import SimpleNamespace
 
@@ -55,7 +56,11 @@ def test_other_links_are_refused(link):
 
 def test_titles_become_safe_folder_names():
     assert video.clean_title('What?  A "great" talk: part 1/2 | Live...') == "What A great talk: part 1 2 Live"
-    assert video.clean_title("x" * 300) == "x" * 100
+    assert video.clean_title("x" * 300) == "x" * 50  # one long word is cut hard
+    long = "Senator Bernie Sanders: Iran Wasn't Trump's Idea. Someone Else Pushed Him Into It!"
+    assert video.clean_title(long) == "Senator Bernie Sanders: Iran Wasn't Trump's Idea"  # cut after the last whole word that fits
+    assert video.clean_title("a" * 49 + " bcd") == "a" * 49 and video.clean_title("a" * 50 + " bcd") == "a" * 50
+    assert video.clean_title("Short title") == "Short title"
 
 
 def test_cuts_land_in_pauses_near_each_target_and_short_audio_is_not_cut():
@@ -228,6 +233,7 @@ def ask(client, monkeypatch, *messages, question="What is focus?"):
     wait_for(lambda: client.get(nb_url(client, "sources")).json()[0]["status"] == "ready")
     write_short_source()
     monkeypatch.setattr(chat, "build_chat_model", lambda: ScriptedModel(script=list(messages)))
+    monkeypatch.setattr(chat, "build_title_model", lambda: ScriptedModel(script=[AIMessage(content="Video chat")]))
     session = client.post(nb_url(client, "chat/sessions")).json()["id"]
     res = client.post(f"/api/chat/sessions/{session}/messages", json={"message": question, "source_slugs": ["how_focus_works_a_talk"]})
     return sse_events(res)
@@ -266,6 +272,46 @@ def test_searching_a_short_source_says_to_read_it_whole_and_searches_nothing(cli
 
     assert searched == []
     assert "no search index" in seen_by_model[-1] and "read_full_source" in seen_by_model[-1] and "'how_focus_works_a_talk'" in seen_by_model[-1]
+
+
+def test_the_model_sees_the_full_slug_unless_it_is_too_long_to_copy():
+    assert qa_tools.slug_for_model("how_focus_works_a_talk") == "how_focus_works_a_talk"
+    exactly = "a" * video.MAX_TITLE_CHARS
+    assert qa_tools.slug_for_model(exactly) == exactly
+    long = "senator_bernie_sanders_iran_wasn't_trump's_idea._someone_else_pushed_him_into_it!"
+    assert qa_tools.slug_for_model(long) == qa_tools.short_slug(long) != long
+
+    note = chat._source_note([{"slug": long, "title": "T", "kind": "youtube"}, {"slug": "a_talk", "title": "A", "kind": "youtube"}], [long, "a_talk"])
+    assert f"slug: {qa_tools.short_slug(long)})" in note and "slug: a_talk)" in note and long not in note
+
+
+def test_a_video_has_a_short_slug_the_model_can_copy_and_read_it_by_either_name():
+    long = "senator_bernie_sanders_iran_wasn't_trump's_idea._someone_else_pushed_him_into_it!"
+    short = qa_tools.short_slug(long)
+    assert re.fullmatch(r"[a-z0-9_]{1,30}", short) and short.startswith("senator_bernie_sanders_")
+    assert qa_tools.short_slug(long) == short and qa_tools.short_slug("another_talk") != qa_tools.short_slug("another_talks")
+    for name in (short, short.upper(), f"'{short}'", long, f" {long} "):
+        assert qa_tools._resolve(name, [long, "deep_talk"]) == long
+    assert qa_tools._resolve("deep_work", [long, "deep_talk"]) is None
+
+
+def test_a_source_is_read_in_full_by_its_short_slug(client, monkeypatch):
+    by_short = AIMessage(content="", tool_calls=[{"name": "read_full_source", "args": {"slug": qa_tools.short_slug("how_focus_works_a_talk")}, "id": "c1"}])
+    seen_by_model = []
+
+    class Spy(ScriptedModel):
+        def _generate(self, messages, *a, **k):
+            seen_by_model.append(messages[-1].content)
+            return super()._generate(messages, *a, **k)
+
+    fake_ingest(monkeypatch)
+    add_video(client)
+    wait_for(lambda: client.get(nb_url(client, "sources")).json()[0]["status"] == "ready")
+    write_short_source()
+    monkeypatch.setattr(chat, "build_chat_model", lambda: Spy(script=[by_short, AIMessage(content="done")]))
+    session = client.post(nb_url(client, "chat/sessions")).json()["id"]
+    client.post(f"/api/chat/sessions/{session}/messages", json={"message": "q", "source_slugs": ["how_focus_works_a_talk"]})
+    assert "Full transcript of How Focus Works: A Talk (2 passages)" in seen_by_model[1]
 
 
 def test_a_source_is_read_in_full_only_once_per_conversation(client, monkeypatch):

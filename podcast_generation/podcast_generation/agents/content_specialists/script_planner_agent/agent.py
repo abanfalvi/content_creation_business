@@ -26,6 +26,7 @@ from openrouter.components import (
 from .state import ScriptPlannerState
 from ...models import SCRIPT_PLANNER_MODEL, track, DECISION_JUDGE
 from ..utils import checkpointer, get_book_path
+from podcast_generation.services.formats import plan_criteria
 
 
 with open(Path(__file__).parent / "prompt.md", "r", encoding="utf-8") as f:
@@ -42,7 +43,7 @@ file_manager_middleware = FilesystemMiddleware(
     tool_token_limit_before_evict=30_000
 )
 
-ARTIFACT_FILENAME = "script_plan.md"   # the planner's output, under data/<book slug>/
+ARTIFACT_FILENAME = "script_plan.md"   # the planner's output, under data/<source slug>/
 BOOK_FILENAME = "book_content.md"      # the source the plan's line citations point into
 MAX_VERIFY_ATTEMPTS = 3
 READY_THRESHOLD = 0.6
@@ -54,12 +55,12 @@ READY_CRITERIA = (
     "close and outro takeaways. Each main segment states one core idea and lists "
     "supporting evidence in its own words, specific and self-contained (the names, "
     "numbers, findings and, for stories, the steps), so a writer could draft from it "
-    "without opening the book. Every evidence item, and every book-derived "
+    "without opening the source. Every evidence item, and every source-derived "
     "fact in the other sections, ends with a line citation such as [L120] or [L120-135] "
     "(several allowed: [L45, L120-135]). Citations are narrow ranges (a few lines, rarely "
     "more than about thirty, never a whole chapter), have a start no greater than their "
     "end, and fall between line 1 and book_total_lines. Nothing is uncited unless it is "
-    "explicitly marked '(not from the book)'. The plan contains no dialogue script, "
+    "explicitly marked '(not from the source)'. The plan contains no dialogue script, "
     "placeholders, TODOs, a leftover '<!-- END OF PLAN -->' marker, truncated or "
     "cut-off sections, tool error messages, or assistant chatter."
 )
@@ -67,7 +68,7 @@ READY_CRITERIA = (
 READY_NOT_CRITERIA = (
     "The artifact is empty, unfinished or cut off, is missing required sections or has "
     "segments without a clear single core idea, has vague evidence that only points at a "
-    "topic ('the book discusses X') without the actual content, has evidence items or facts with no line "
+    "topic ('the source discusses X') without the actual content, has evidence items or facts with no line "
     "citation, uses citations in the wrong form (page or chapter numbers, a whole chapter "
     "as one range, ranges that run backwards), cites line numbers beyond book_total_lines, "
     "is written as dialogue instead of a plan, or contains placeholders, TODOs, the "
@@ -78,13 +79,19 @@ ARTIFACT_READY_QUESTION: DecisionsNoulQuestionTypedDict = {
     "type": "noul",
     "instructions": (
         "Is this segment plan finished and good for the Script Drafter to follow "
-        "as-is, with every piece of book evidence backed by a line-number citation?"
+        "as-is, with every piece of source evidence backed by a line-number citation?"
     ),
     "criteria": {
         "true": READY_CRITERIA,
         "false": READY_NOT_CRITERIA,
     },
 }
+
+
+def _ready_question(slug: str) -> tuple[str, DecisionsNoulQuestionTypedDict]:
+    """The judge's question for this run: a non-default format brings its own idea of a finished plan."""
+    criteria = plan_criteria(slug) or READY_CRITERIA
+    return criteria, {**ARTIFACT_READY_QUESTION, "criteria": {"true": criteria, "false": READY_NOT_CRITERIA}}
 
 
 def _send_back(attempts: int, message: str) -> dict[str, Any]:
@@ -104,6 +111,7 @@ def verify_artifact(state: ScriptPlannerState, runtime: Runtime) -> dict[str, An
         return None  # out of retries, or nothing to locate the artifact by
 
     path = DATA_DIR / get_book_path(book_title) / ARTIFACT_FILENAME
+    criteria, question = _ready_question(get_book_path(book_title))
     if not os.path.exists(path):
         return _send_back(attempts, f"Required file {path} doesn't exist yet. Create it before finishing.")
 
@@ -113,9 +121,9 @@ def verify_artifact(state: ScriptPlannerState, runtime: Runtime) -> dict[str, An
         return _send_back(attempts, f"{path} exists but is empty. Write its content before finishing.")
 
     judged_state: dict[str, Any] = {"artifact_path": path, "artifact": content[:MAX_JUDGE_CHARS]}
-    # Some books are stored as <name>_book_content.md, so match on the suffix
+    # Some sources are stored as <name>_book_content.md, so match on the suffix
     book_files = sorted(glob.glob(str(DATA_DIR / get_book_path(book_title) / f"*{BOOK_FILENAME}")))
-    if book_files:  # lets the judge flag citations pointing past the end of the book
+    if book_files:  # lets the judge flag citations pointing past the end of the source
         with open(book_files[0], "r", encoding="utf-8") as f:
             judged_state["book_total_lines"] = sum(1 for _ in f)
     if len(content) > MAX_JUDGE_CHARS:
@@ -125,7 +133,7 @@ def verify_artifact(state: ScriptPlannerState, runtime: Runtime) -> dict[str, An
         with OpenRouter(api_key=os.environ.get("OPENROUTER_API_KEY")) as client:
             res = client.alpha.decisions.create(
                 model=DECISION_JUDGE,
-                questions={"artifact_ready": ARTIFACT_READY_QUESTION},
+                questions={"artifact_ready": question},
                 state=judged_state,
             )
     except Exception as err:  # judge outage must not block or loop the agent
@@ -143,7 +151,7 @@ def verify_artifact(state: ScriptPlannerState, runtime: Runtime) -> dict[str, An
     return _send_back(
         attempts,
         f"A reviewer judged {path} not ready (P(ready)={answer.noul:.2f}, need >= {READY_THRESHOLD}). "
-        f"Re-read it and fix: {READY_CRITERIA} "
+        f"Re-read it and fix: {criteria} "
         "Then finish again.",
     )
 

@@ -12,8 +12,7 @@ from ..utils import get_book_path
 
 
 COMPRESSION_PROMPT = """You are the memory compressor for a Script Drafter agent. The agent is writing a
-podcast script (a conversation between a host and an expert) for one non-fiction
-book, working over many tool calls. Its context window is full, so the transcript
+podcast script (a conversation between a host and an expert) for one source, working over many tool calls. Its context window is full, so the transcript
 below will be deleted and replaced by the memory entry you write. The agent will
 continue its work reading only your entry, so anything you leave out is lost to it,
 and anything you get wrong it will treat as true.
@@ -40,10 +39,12 @@ section's heading and the line "None." if it has nothing to report. Do not add
 other sections, a preamble, or a closing remark.
 
 ### Task and scope
-Two or three lines: the book title, the plan the agent is drafting from, and what the
+Two or three lines: the source title, the plan the agent is drafting from, and what the
 agent was asked to produce. If a human or evaluator message changed the task
 (for example revision instructions), say so here and point to the section that
-holds the details.
+holds the details. If the task message has an "# Episode brief" section (a format and
+the user's custom instructions), copy that section into this one word for word: it is
+lost with the transcript otherwise, and it governs the whole script.
 
 ### Script state
 - Segments already in script.md, in order, each with one line on its content. Mark
@@ -57,7 +58,7 @@ holds the details.
 Only things the transcript actually confirmed. Each one is a single self-contained
 statement that is still useful with no other context. Include:
 - Facts from the plan that the agent has used or must still respect (a claim's exact
-  wording, a statistic, a name, the steps of an example, a hedge the book attaches),
+  wording, a statistic, a name, the steps of an example, a hedge the source attaches),
   each with the plan's citation, for example [L412], where the transcript shows one.
   Also record anything the agent confirmed with retrieve_info, with the query that
   surfaced it and, if only a fragment was seen, say so. Record the source's wording
@@ -78,12 +79,12 @@ Open sub-questions, not here. Never promote a guess, a plan or an intention to a
 Things the agent tried or suspected that turned out not to hold, so that it does
 not repeat them. For each, state what was ruled out and the reason in a few words:
 - A claim the persona suggested, or the agent assumed, that the plan does not
-  support, or that a reviewer showed the book contradicts. Say which, and what the
+  support, or that a reviewer showed the source contradicts. Say which, and what the
   plan or the reviewer's evidence says instead where known.
 - An example or angle that was dropped (not in the plan, off-topic, already covered
   in another segment).
 - A retrieve_info query that returned nothing useful: the query. It proves only that
-  the query missed, so word it carefully ("no relevant chunk for X", not "the book
+  the query missed, so word it carefully ("no relevant chunk for X", not "the source
   never mentions X").
 - A tool call that failed and the cause (for example an edit whose text matched
   several places, an edit attempted before read_script, a wrong path).
@@ -216,7 +217,7 @@ class ScriptDrafterTools:
     @tool
     @staticmethod
     def read_plan(runtime: ToolRuntime[None, ScriptDrafterState]) -> str:
-        "Read the script plan the Script Planner wrote for this book: episode thesis, cold open candidates, setup, the main segments with their cited evidence, the turn, the practical close and the outro takeaways. It is your only source of book material."
+        "Read the script plan the Script Planner wrote for this source: episode thesis, cold open candidates, setup, the main segments with their cited evidence, the turn, the practical close and the outro takeaways. It is your only source of source material."
         title = get_book_path(runtime.state.get("book_title"))
         path = DATA_DIR / title / "script_plan.md"
         try:
@@ -230,7 +231,7 @@ class ScriptDrafterTools:
     @tool
     @staticmethod
     def read_book_content(runtime: ToolRuntime[None, ScriptDrafterState], offset: int = 1, limit: int = 200) -> str:
-        "Read the book's full parsed content by line range (1-indexed). Pass a line number that grep_search reported as offset to read that passage in its natural paragraph flow, instead of grep's flat per-line output."
+        "Read the source's full parsed content by line range (1-indexed). Pass a line number that grep_search reported as offset to read that passage in its natural paragraph flow, instead of grep's flat per-line output."
         book_title = runtime.state.get("book_title")
         title = get_book_path(book_title)
         with open(DATA_DIR / title / "book_content.md", "r", encoding="utf-8") as f:

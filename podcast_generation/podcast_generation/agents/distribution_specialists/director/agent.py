@@ -16,7 +16,6 @@ from .step_prompts import DistributionDirectorPrompt
 from .state import MultiAgentState
 from ...models import DISTRIBUTION_DIRECTOR_MODEL, track
 from ..utils import get_checkpointer
-from podcast_generation.memory.memory_store import get_shared_store
 from podcast_generation.settings import SKILLS_DIR
 
 
@@ -52,12 +51,18 @@ STEP_CONFIG = {
         "tools": [DirectorTools.call_sm_writer_agent, DirectorTools.call_publisher_agent, DirectorTools.get_review_materials],
         "requires": ["caption_path", "image_post_path"],
     },
+    # UNHOOKED (memory / self-evolution): nothing routes here while the lessons step is off.
     "get_lessons_learned": {
         "prompt": "",
         "tools": [DirectorTools.save_learnable_traces],
         "requires": [],
     },
-
+    # Where a published post lands now: no tools, so the model just confirms and the run ends.
+    "published": {
+        "prompt": "The post has been published. Reply with one short sentence confirming it is done. Do not call any tools.",
+        "tools": [],
+        "requires": [],
+    },
 }
 
 def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str | None = None):
@@ -183,21 +188,18 @@ def apply_step_config(
 
     return handler(request)
 
+# UNHOOKED (memory / self-evolution): read/edit_subagents_system_prompt, update_specialist_skills and
+# save_learnable_traces are defined in DirectorTools but not registered here, and no store is passed below.
 all_tools = [
     DirectorTools.call_publisher_agent,
     DirectorTools.call_sm_writer_agent,
-    DirectorTools.read_subagents_system_prompt,
-    DirectorTools.edit_subagents_system_prompt,
-    DirectorTools.save_learnable_traces,
-    DirectorTools.update_specialist_skills,
     DirectorTools.get_review_materials
 ]
 
 @cache
 def get_director_agent():
-    """Build the distribution director on first use. This connects to the Postgres store
-    and (through the sub-agents) to the Canva / Buffer MCP servers, so it is not done at
-    import time. Call it outside a running event loop (see _sub_agents)."""
+    """Build the distribution director on first use. This connects (through the sub-agents)
+    to the Canva / Buffer MCP servers, so it is not done at import time. Call it outside a running event loop (see _sub_agents)."""
     checkpointer = get_checkpointer()  # created before the sub-agent builders run their own loop
     _sub_agents()
     agent = create_agent(
@@ -207,13 +209,11 @@ def get_director_agent():
         state_schema=MultiAgentState,
         middleware=[
             apply_step_config,
-            FilesystemFileSearchMiddleware(
-                root_path=str(SKILLS_DIR / "distribution_skills"),
-                use_ripgrep=True,
-            ),
+            # UNHOOKED (self-evolution): skill lookup for editing skills
+            # FilesystemFileSearchMiddleware(root_path=str(SKILLS_DIR / "distribution_skills"), use_ripgrep=True),
         ],
         checkpointer=checkpointer,
-        store=get_shared_store(),
+        # UNHOOKED (memory): store=get_shared_store() (lessons-learned traces)
     )
     return track(agent)
 

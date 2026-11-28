@@ -9,7 +9,7 @@ HOME = tempfile.mkdtemp(prefix="podcast_test_")
 os.environ["PODCAST_HOME"] = HOME
 for key in ("POSTGRES_URI", "OPIK_API_KEY", "OPIK_WORKSPACE"):
     os.environ.pop(key, None)
-for key in ("OPENROUTER_API_KEY", "TAVILY_API_KEY", "MINERU_API_KEY"):
+for key in ("OPENROUTER_API_KEY", "MINERU_API_KEY"):
     os.environ[key] = "test"
 os.environ["CHAT_CONTEXT_WINDOW"] = "100000"  # no model-list lookup over the network
 
@@ -28,6 +28,17 @@ def make_pdf(pages: int = 3) -> bytes:
     buf = io.BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def no_title_model(monkeypatch):
+    """Naming a chat or an episode is one LLM call: no test may reach the network for it unless it supplies its own model."""
+    from podcast_generation.services import chat
+
+    def refuse():
+        raise RuntimeError("the title model is not available in tests")
+
+    monkeypatch.setattr(chat, "build_title_model", refuse)
 
 
 @pytest.fixture()

@@ -24,7 +24,6 @@ def track(graph, trace=True):
 
 
 # Content specialists
-BOOK_SELECTION_MODEL = "inclusionai/ling-3.1-flash"
 EXPERT_BUILDER_MODEL = "minimax/minimax-m3.1-flash"
 SCRIPT_DRAFTER_MODEL = "minimax/minimax-m3.1-flash"
 SCRIPT_PLANNER_MODEL = "minimax/minimax-m3.1-flash"
@@ -33,7 +32,7 @@ DIGEST_MODEL = "z-ai/glm-5.3-flash"
 DIRECTOR_MODEL = "deepseek/deepseek-v4-flash-0731"
 
 # Production specialists
-AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.6" # google/gemini-2.5-flash-lite
+AUDIO_ENGINEER_MODEL = "xiaomi/mimo-v2.6-flash"
 
 # Speech-to-text for YouTube sources (OpenRouter /audio/transcriptions)
 TRANSCRIPTION_MODEL = "x-ai/grok-stt-2.0"
@@ -41,6 +40,9 @@ TRANSCRIPTION_MODEL = "x-ai/grok-stt-2.0"
 # Chat (question answering over the selected sources)
 CHAT_MODEL = "baidu/ernie-5.5-flash-preview:free"
 FALLBACK_MODEL = "z-ai/glm-5.3-flash"
+
+# One-shot call that names a chat after its first message
+CHAT_TITLE_MODEL = "z-ai/glm-5.3-flash"
 
 # Compressor Model
 COMPRESSOR_MODEL = "inclusionai/ling-3.1-flash"

@@ -18,13 +18,20 @@ Score the episode 1-5 on each dimension below:
 - **Loudness consistency** — host and expert segments sound comparably
   loud; no segment forces the listener to reach for the volume knob.
 - **Noise & clarity** — no hiss, rumble, clicks, or TTS artifacts audible
-  over the dialogue.
+  over the dialogue. A delivery tag from the script, such as `[curious]` or
+  `[laughing]`, spoken aloud as a word is a TTS artifact: score this
+  dimension 3 or lower and give the time it is heard.
 - **Silence & pacing** — no dead air longer than a natural conversational
   pause, and no turn that sounds clipped short mid-word.
 - **Transitions** — intro/outro fades are smooth, and joins between turns
   don't produce jarring hard cuts.
 - **Technical compliance** — no audible clipping/distortion, and nothing
   that sounds broken or malformed on playback.
+
+Also say, in the evidence, whether the delivery followed the script's
+delivery tags (a `[laughing]` that sounded like a laugh, a `[whispering]`
+that was quieter) or whether the episode was read in one flat tone. There is
+no score for it, but the human reviewer relies on that sentence.
 
 ## Committing the assessment
 

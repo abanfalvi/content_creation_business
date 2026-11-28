@@ -41,3 +41,24 @@ def test_audio_gate_payload_and_resume(monkeypatch):
     out = graph.invoke(Command(resume={"approved": True}), config)
     assert "__interrupt__" not in out
     assert out["episode_result"] == RUBRIC["final_audio_path"] and out["lessons_learned"] == "lessons saved"
+
+
+def test_without_a_store_the_workflow_skips_lessons_but_still_cleans_up_and_ends(monkeypatch):
+    """Memory / self-evolution is unhooked: no store means no stored failure traces fed in and no lessons extractor."""
+    seen = {}
+    monkeypatch.setattr(sg, "build_episode", lambda script, voice_map, output_path: output_path)
+    monkeypatch.setattr(sg, "call_audio_engineer_agent", lambda **kw: seen.update(undesired=kw["undesired_steps"]) or ("done", dict(RUBRIC)))
+    monkeypatch.setattr(sg, "build_lessons_learned_extractor_agent", lambda store: (_ for _ in ()).throw(AssertionError("extractor must not run")))
+    monkeypatch.setattr(sg.audio_engineer_agent, "get_state", lambda cfg: SimpleNamespace(values={"sandboxId": "sbx-1"}))
+    killed = []
+    monkeypatch.setattr(sg, "kill_sandbox", killed.append)
+
+    graph = sg.builder.compile(MemorySaver())
+    config = {"configurable": {"thread_id": "t2"}}
+    graph.invoke({"book_title": "A Book", "expert_name": "Dr. Sam", "script": "s.md", "audio_result": "", "feedback": ""}, config)
+    out = graph.invoke(Command(resume={"approved": True}), config)
+
+    assert seen["undesired"] is None
+    assert killed == ["sbx-1"]
+    assert "__interrupt__" not in out and out["episode_result"] == RUBRIC["final_audio_path"]
+    assert "lessons_learned" not in out

@@ -15,15 +15,15 @@ from ..utils import get_book_path
 
 COMPRESSION_PROMPT = """You are the memory compressor for an Expert Profile Builder agent. The agent is
 building the persona document of a fictional expert (identity, core arguments, voice,
-signature material, likely pushback) for one non-fiction book, working over many tool
-calls: reading the book through retrieval, search and line-range reads, and editing the
+signature material, likely pushback) for one source, working over many tool
+calls: reading the source through retrieval, search and line-range reads, and editing the
 persona file. Its context window is full, so the transcript below will be deleted and
 replaced by the memory entry you write. The agent will continue its work reading only
 your entry, so anything you leave out is lost to it, and anything you get wrong it will
 treat as true.
 
 Your job is to distill the transcript into a structured memory entry. Do not retell the
-conversation. Record what the agent now knows about the book, what it has ruled out, what
+conversation. Record what the agent now knows about the source, what it has ruled out, what
 it still has to find out, and what it should do next.
 
 ## What is stored elsewhere (do not copy it)
@@ -33,7 +33,7 @@ it still has to find out, and what it should do next.
   persona: which of the five sections (Identity, Core arguments, Voice, Signature
   material, Likely pushback) exist, and one line on what each holds. The agent re-reads
   the file anyway before every edit.
-- The book text and the system prompt can be re-read. Keep only the conclusions drawn from
+- The source text and the system prompt can be re-read. Keep only the conclusions drawn from
   them, plus the pointers needed to find them again (line numbers, chapter, search terms
   and retrieve_info queries that worked).
 
@@ -44,9 +44,11 @@ heading and the line "None." if it has nothing to report. Do not add other secti
 preamble, or a closing remark.
 
 ### Task and scope
-Two or three lines: the book title and what the agent was asked to produce or change. If a
+Two or three lines: the source title and what the agent was asked to produce or change. If a
 director or reviewer message changed the task (for example persona feedback), say so here
-and point to the section that holds the details.
+and point to the section that holds the details. If the task message has an "# Episode brief"
+section (a format and the user's custom instructions), copy that section into this one word for
+word: it is lost with the transcript otherwise, and it governs the whole persona.
 
 ### Persona state
 - For each of the five sections: not started, partly written, or written, with one line on
@@ -54,24 +56,24 @@ and point to the section that holds the details.
 - Anything known to be wrong, inconsistent or unsupported in the persona that has not been
   fixed yet.
 
-### Book coverage
+### Source coverage
 What the agent has already read, so it does not read it again:
-- Line ranges of the book already read (or the chapters they belong to), each with one line
-  on what that stretch of the book argues or contains.
-- The book's structure as far as the agent has mapped it (parts, chapters, where the
+- Line ranges of the source already read (or the chapters they belong to), each with one line
+  on what that stretch of the source argues or contains.
+- The source's structure as far as the agent has mapped it (parts, chapters, where the
   thesis and the conclusion sit).
-- Parts of the book that matter for the persona but have not been read yet.
+- Parts of the source that matter for the persona but have not been read yet.
 
 ### Established facts
 Only things the transcript actually confirmed. Each one is a single self-contained
 statement that is still useful with no other context. Include:
-- The book's central thesis, its named frameworks and models and their definitions as the
-  book states them, statistics, studies, names, examples and stories, each with where it
-  was confirmed: the book line number as [L412] where the transcript shows one, or the
+- The source's central thesis, its named frameworks and models and their definitions as the
+  source states them, statistics, studies, names, examples and stories, each with where it
+  was confirmed: the source line number as [L412] where the transcript shows one, or the
   retrieve_info query that surfaced it. If the agent only saw a fragment of an argument, say so.
 - How the author writes (register, use of stories, data, humour, signature phrases), with
   a short exact quote and its line number as evidence.
-- How the book handles objections, limitations or counterarguments, with line numbers.
+- How the source handles objections, limitations or counterarguments, with line numbers.
 - Decisions already made, with a few words of reason: which examples go in which section,
   the expert's name and background, what was deliberately left out.
 - Rules and constraints in force that the agent had to learn or be reminded of.
@@ -83,14 +85,14 @@ not here. Never promote a guess, a plan or an intention to a fact.
 ### Eliminated hypotheses
 Things the agent tried or suspected that turned out not to hold, so that it does not
 repeat them. For each, state what was ruled out and the reason in a few words:
-- A claim the agent assumed that the book does not support or contradicts, and what the
-  book says instead where known.
+- A claim the agent assumed that the source does not support or contradicts, and what the
+  source says instead where known.
 - An example or angle that was dropped (wrong chapter, off-topic, already used elsewhere
   in the persona).
 - A search that returned nothing useful: the query or pattern and where it was run. A
   search that found nothing proves only that the pattern missed unless the transcript says
   the passage was read and is absent, so word these carefully ("no relevant chunk for X in
-  retrieve_info", not "the book never mentions X").
+  retrieve_info", not "the source never mentions X").
 - A tool call that failed and the cause (for example an edit whose text matched several
   places, an edit attempted before read_persona).
 - An approach the agent abandoned, and why.
@@ -98,8 +100,8 @@ repeat them. For each, state what was ruled out and the reason in a few words:
 ### Open sub-questions
 Specific, answerable questions the agent still needs to settle before the persona can be
 called finished. Phrase each as a question and add where to look:
-- Claims in the persona not yet grounded in the book. Quote enough of the claim to find it.
-- Frameworks, examples or objections the book probably develops further that the agent has
+- Claims in the persona not yet grounded in the source. Quote enough of the claim to find it.
+- Frameworks, examples or objections the source probably develops further that the agent has
   not yet read.
 - Conflicts between sources not yet resolved.
 - Open feedback: every unresolved instruction from the director or a reviewer. Keep the
@@ -204,7 +206,7 @@ class ExpertProfileTools:
     @tool
     @staticmethod
     def read_book_digest(runtime: ToolRuntime[None, ExpertBuilderState]) -> str:
-        "Read the book digest: a compact map of the whole book built in advance, with its thesis, structure, central frameworks, the author's voice (verbatim quotes) and how it handles objections, then for every stretch of the book a summary with line-cited claims, frameworks, examples and objections. Read it first, before any other reading. It takes no arguments."
+        "Read the source digest: a compact map of the whole source built in advance, with its thesis, structure, central frameworks, the author's voice (verbatim quotes) and how it handles objections, then for every stretch of the source a summary with line-cited claims, frameworks, examples and objections. Read it first, before any other reading. It takes no arguments."
         title = get_book_path(runtime.state.get("book_title"))
         if not is_indexed(title):
             # A short transcript has no digest: it is small enough to read whole, line numbers included.
@@ -221,14 +223,14 @@ class ExpertProfileTools:
         except OSError:
             return (
                 f"No digest exists at {path}; it is built when a podcast generation starts, so this one failed to build. "
-                "Until then, get to know the book with retrieve_info, grep_search on its headings and read_book_content, "
+                "Until then, get to know the source with retrieve_info, grep_search on its headings and read_book_content, "
                 "and keep the reading targeted."
             )
 
     @tool
     @staticmethod
     def read_book_content(runtime: ToolRuntime[None, ExpertBuilderState], offset: int = 1, limit: int = 200) -> str:
-        "Read the book's full parsed content by line range (1-indexed). Use this to read a passage in its natural paragraph flow when a retrieve_info chunk feels incomplete or cut off mid-argument."
+        "Read the source's full parsed content by line range (1-indexed). Use this to read a passage in its natural paragraph flow when a retrieve_info chunk feels incomplete or cut off mid-argument."
         book_title = runtime.state.get("book_title")
         title = get_book_path(book_title)
         with open(DATA_DIR / title / "book_content.md", "r", encoding="utf-8") as f:

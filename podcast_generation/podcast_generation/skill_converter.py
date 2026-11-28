@@ -15,7 +15,7 @@ skill_converter_model = ChatOpenRouter(
 )
 
 class SkillSchema(BaseModel):
-    agent_name: Literal['book_selection_agent', 'expert_builder_agent', 'script_drafter_agent', 'audio_engineer_agent']
+    agent_name: Literal['expert_builder_agent', 'script_drafter_agent', 'audio_engineer_agent']
     skill_name: str
     skill_content: str
 

@@ -15,3 +15,4 @@ class AudioEngineerState(AgentState):
     active_step: NotRequired[Literal["edit_audio", "score_final_result"]]
     rubric_scores: RubricScores
     sandboxId: NotRequired[str]
+    audio_path: NotRequired[str]

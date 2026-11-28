@@ -31,7 +31,6 @@ Thumbs.db
 data/
 tmp/
 interface.ipynb
-podcast_generation/book_list.json
 *clustering.py
 assets/PROJECT.md
 # Web app runtime state and build output

@@ -26,7 +26,7 @@ class DistributionDirectorPrompt:
     - The caption and the visual are telling the same version of the
       episode — not drifting into two different angles.
     - Both a saved caption file and a downloaded export actually exist in
-      the book's social_contents folder — a description of a post having
+      the source's social_contents folder — a description of a post having
       been made is not the same as the files existing.
 
     If the draft falls short on any of these, call draft_sm_content and

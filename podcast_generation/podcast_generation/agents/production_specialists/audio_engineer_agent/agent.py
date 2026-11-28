@@ -106,7 +106,7 @@ audio_engineer = create_agent(
         ),
         ModelFallbackMiddleware(
             ChatOpenRouter(model="google/gemini-2.5-flash-lite", temperature=0.2),
-            ChatOpenRouter(model="thinkingmachines/inkling-small", temperature=0.2)
+            ChatOpenRouter(model="thinkingmachines/inkling-2-small", temperature=0.2)
         )
     ],
     checkpointer=checkpointer,

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from ...models import EVALUATOR_MODEL
 from ..shared_tools import SharedContentTools
 from ..utils import get_book_path
+from podcast_generation.services.formats import read_brief
 
 
 evaluator_model = ChatOpenRouter(model=EVALUATOR_MODEL, temperature=.3, max_tokens=8192)
@@ -29,7 +30,7 @@ MAX_ATTEMPTS = 3
 class RevisionLoopState(TypedDict):
     book_title: str  
 
-    fidelity_score: Annotated[NotRequired[float], "Scale of 0.0-1.0 based on how much the script reflects the book's true content"]
+    fidelity_score: Annotated[NotRequired[float], "Scale of 0.0-1.0 based on how much the script reflects the source's true content"]
     fidelity_proof: NotRequired[str]
     fidelity_findings: NotRequired[list[dict]]
 
@@ -48,12 +49,12 @@ class RevisionLoopState(TypedDict):
 class Finding(BaseModel):
     location: str = Field(description="Verbatim excerpt (about 15 words max) from the script, unique within it, so an editor can find the spot with an exact match")
     issue: str = Field(description="What is wrong, and which rule or check it breaks")
-    evidence: str = Field(description="What the book or the script shows. For book material, quote the matching line or retrieved passage briefly, with its book line number such as [L412] when you have one")
+    evidence: str = Field(description="What the source or the script shows. For source material, quote the matching line or retrieved passage briefly, with its source line number such as [L412] when you have one")
     suggested_fix: str = Field(description="The smallest change that fixes it. Describe it; do not write the new dialogue")
     severity: Literal["high", "medium", "low"]
 
 class FidelitySchema(BaseModel):
-    fidelity_score: float | None = Field(description="Scale of 0.0-1.0 based on how much the script reflects the book's true content", le=1.0, ge=0.0)
+    fidelity_score: float | None = Field(description="Scale of 0.0-1.0 based on how much the script reflects the source's true content", le=1.0, ge=0.0)
     fidelity_proof: str = Field(description="Evidence from the script justifying your score")
     findings: list[Finding] = Field(default_factory=list, description="One entry per real problem, most severe first. Empty if the script is faithful")
 
@@ -82,20 +83,21 @@ def _read_optional(path: Path) -> str | None:
 def _load_context(book_title: str) -> dict:
     """Everything an evaluator may be shown, read fresh from disk so it sees the latest draft."""
     book_dir = DATA_DIR / get_book_path(book_title)
-    book_files = sorted(book_dir.glob("*book_content.md"))  # some books are <name>_book_content.md
+    book_files = sorted(book_dir.glob("*book_content.md"))  # some sources are <name>_book_content.md
     return {
         "script": _read_optional(book_dir / "script.md"),
         "plan": _read_optional(book_dir / "script_plan.md"),
         "expert": _read_optional(book_dir / "expert_persona.md"),
         "host": _read_optional(DATA_DIR / "host_persona.md"),
         "book_file": book_files[0] if book_files else None,
+        "episode_format": read_brief(get_book_path(book_title)),  # empty for a run in the standard format
     }
 
 
 # Tag names for the sections of the evaluator's input. Tags, not markdown headings:
 # the persona files and the plan carry their own headings.
 _SECTION_TAGS = {
-    "plan": ("script_plan", "(No script plan exists for this book. Judge without it.)"),
+    "plan": ("script_plan", "(No script plan exists for this source. Judge without it.)"),
     "expert": ("expert_persona", "(Expert persona file not found.)"),
     "host": ("host_persona", "(Host persona file not found.)"),
 }
@@ -104,7 +106,9 @@ _SECTION_TAGS = {
 def _compose_message(book_title: str, ctx: dict, sections: tuple[str, ...]) -> str:
     # Virtual path as the file search tools see it (their root is the data folder)
     book_path = "/" + ctx["book_file"].relative_to(DATA_DIR).as_posix()
-    parts = [f"Book: {book_title}", f"Book file: {book_path}", "", "<draft_script>", ctx["script"], "</draft_script>"]
+    parts = [f"Source: {book_title}", f"Source file: {book_path}", "", "<draft_script>", ctx["script"], "</draft_script>"]
+    if ctx["episode_format"]:  # the run's format and the user's custom instructions: judge the script against them
+        parts += ["", "<episode_format>", ctx["episode_format"], "</episode_format>"]
     for key in sections:
         tag, missing = _SECTION_TAGS[key]
         parts += ["", f"<{tag}>", ctx[key] or missing, f"</{tag}>"]
@@ -118,7 +122,7 @@ def _evaluate(state: RevisionLoopState, *, prefix: str, schema, system_prompt: s
         print(f"[{prefix}_evaluator] {reason}")
         return {f"{prefix}_score": None, f"{prefix}_proof": f"Evaluator did not run: {reason}", f"{prefix}_findings": []}
 
-    # The book is a required input of every evaluator: raise instead of scoring without it.
+    # The source is a required input of every evaluator: raise instead of scoring without it.
     book_title = state.get("book_title")
     if not book_title:
         raise ValueError(f"[{prefix}_evaluator] state has no book_title")
@@ -131,7 +135,7 @@ def _evaluate(state: RevisionLoopState, *, prefix: str, schema, system_prompt: s
         return failed(f"no script found at data/{get_book_path(book_title)}/script.md")
 
     if shutil.which("rg") is None:
-        raise RuntimeError(f"[{prefix}_evaluator] ripgrep (rg) is not on PATH; grep_search cannot read the books without it")
+        raise RuntimeError(f"[{prefix}_evaluator] ripgrep (rg) is not on PATH; grep_search cannot read the sources without it")
 
     agent = create_agent(
         model=evaluator_model,

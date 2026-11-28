@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
-from podcast_generation.services import chat, generation, notebooks, preferences, sources
+from podcast_generation.services import chat, formats, generation, notebooks, preferences, sources
 
 router = APIRouter(prefix="/api")
 
@@ -190,7 +190,8 @@ async def send_message(session_id: str, body: ChatRequest, request: Request):
         raise HTTPException(422, "Select at least one processed source to ask about.")
     unindexed = [s for s in slugs if not ready[s]["indexed"]]  # short transcripts: no search, the whole text is read
 
-    chat.touch_session(session_id, first_message=body.message)
+    chat.touch_session(session_id)
+    spawn(chat.name_session(session_id, body.message))  # a fresh chat is named after its first message
     engine = _engine(request)
 
     async def events():
@@ -220,8 +221,11 @@ def delete_preference(preference_id: str):
 # --- generating episodes ----------------------------------------------------------------------
 
 class GenerateRequest(BaseModel):
-    source_slug: str
-
+    source_slugs: list[str] = []  # several sources make one combined episode
+    source_slug: str | None = None  # a single source (the original form)
+    format: str | None = None  # an id from GET /formats; the default format when left out
+    instructions: str | None = None  # custom instructions that steer the episode within its format
+    format_description: str | None = None  # the user's own description of the episode (required for "custom")
 
 class DecisionRequest(BaseModel):
     approved: bool
@@ -230,9 +234,16 @@ class DecisionRequest(BaseModel):
 
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateRequest):
-    job = generation.start_generation(body.source_slug)
+    slugs = body.source_slugs or ([body.source_slug] if body.source_slug else [])
+    job = generation.start_generation(slugs, body.format, body.instructions, body.format_description)
     spawn(in_thread(generation.advance, job["id"]))
     return generation.describe(job)
+
+
+@router.get("/formats")
+def list_formats():
+    """The episode formats a run can be made in (no agent instructions: just what the UI shows)."""
+    return formats.list_formats()
 
 
 @router.get("/notebooks/{notebook_id}/jobs")
@@ -247,6 +258,12 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "No such job.")
     return generation.describe(job)
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+def delete_job(job_id: str):
+    """Remove a failed run from the list. Refused (409) for a run that is still going or finished."""
+    generation.delete_job(job_id)
 
 
 @router.post("/jobs/{job_id}/decision", status_code=202)
@@ -279,6 +296,11 @@ def _episode(row: dict) -> dict:
 def list_episodes(notebook_id: str):
     notebooks.require_notebook(notebook_id)
     return [_episode(e) for e in generation.list_episodes(notebook_id)]
+
+
+@router.delete("/episodes/{episode_id}", status_code=204)
+def delete_episode(episode_id: str):
+    generation.delete_episode(episode_id)
 
 
 @router.get("/episodes/{episode_id}/audio")

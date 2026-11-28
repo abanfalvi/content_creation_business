@@ -1,4 +1,4 @@
-import hashlib, uuid
+import hashlib, re, uuid
 from typing import Any, Iterable, Sequence, Literal
 
 from langchain.tools import ToolRuntime, tool
@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 from ...book_preprocessing.source_meta import book_file, read_meta
 from ...book_preprocessing.store import summaries_vector_store, vector_store
-from ...book_preprocessing.video import split_transcript
+from ...book_preprocessing.video import MAX_TITLE_CHARS, split_transcript
 from ...reranker import OpenRouterRerank
 from ...services import preferences
 
@@ -25,6 +25,30 @@ def _ref(slug: str, chunk_idx: Any, kind: str) -> str:
     """
     book = hashlib.sha1(str(slug).encode("utf-8")).hexdigest()[:5]
     return f"{book}-{chunk_idx}" + ("s" if kind == "summary" else "")
+
+
+def short_slug(slug: str) -> str:
+    """A short, punctuation-free name for a source that the model can copy exactly, e.g. `senator_bernie_sanders_3f9a`.
+
+    The real slug is the title run through `get_book_path`, so it keeps apostrophes, "!" and the like and can be very
+    long. It still names the source's files and index entries; this is only what the model is shown and asked to repeat.
+    """
+    words = re.findall(r"[a-z0-9]+", str(slug).lower())[:3]
+    return "_".join([*words, hashlib.sha1(str(slug).encode("utf-8")).hexdigest()[:4]])
+
+
+def slug_for_model(slug: str) -> str:
+    """What the model is shown for a source: its full slug (the folder name) unless that is too long to copy reliably."""
+    return slug if len(slug) <= MAX_TITLE_CHARS else short_slug(slug)
+
+
+def _resolve(name: str, readable: Sequence[str]) -> str | None:
+    """The readable source a model's `read_full_source` argument names: its short slug or the full one, quoting aside."""
+    wanted = str(name).strip().strip("'\"`").strip().lower()
+    for slug in readable:
+        if wanted in (slug.lower(), short_slug(slug)):
+            return slug
+    return None
 
 
 def _hit(d: Document) -> dict[str, Any]:
@@ -150,7 +174,7 @@ def _unindexed_slugs(runtime: ToolRuntime) -> list[str]:
 def _unindexed_note(slugs: list[str]) -> str:
     return (
         "These selected sources are short and have no search index, so a search cannot find anything in them. "
-        "Read each one whole with read_full_source: " + ", ".join(f"'{s}'" for s in slugs) + "."
+        "Read each one whole with read_full_source: " + ", ".join(f"'{slug_for_model(s)}'" for s in slugs) + "."
     ) if slugs else ""
 
 
@@ -204,10 +228,12 @@ class QAChatAgentTools:
     @tool(response_format="content_and_artifact")
     @staticmethod
     def read_full_source(slug: str, runtime: ToolRuntime) -> tuple[str, list[dict]]:
-        """Read a whole short source (the transcript of a video) that has no search index. Use it only for the sources the search tools name, and give the source's slug. Returns every passage with its reference and the time its stretch of audio starts."""
+        """Read a whole short source (the transcript of a video) that has no search index. Use it only for the sources the search tools name, and give the source's slug exactly as the search results or the source list show it. Returns every passage with its reference and the time its stretch of audio starts."""
         readable = _unindexed_slugs(runtime)
-        if slug not in readable:
-            return (f"'{slug}' cannot be read in full. " + (f"Readable sources: {', '.join(readable)}." if readable else "No selected source can be read in full; use the search tools.")), []
+        full = _resolve(slug, readable)
+        if full is None:
+            return (f"'{slug}' cannot be read in full. " + (f"Readable sources: {', '.join(slug_for_model(s) for s in readable)}." if readable else "No selected source can be read in full; use the search tools.")), []
+        slug = full
         seen = _seen(runtime)
         passages = [p for p in _passages(slug) if _key(p) not in seen]
         if not passages:

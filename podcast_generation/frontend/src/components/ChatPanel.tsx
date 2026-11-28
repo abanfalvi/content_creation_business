@@ -316,11 +316,13 @@ export default function ChatPanel({ notebookId, selectedSlugs }: Props) {
             }
           }}
         />
-        {usage && <ContextRing usage={usage} />}
-        <span className="source-count">{selectedSlugs.length} {selectedSlugs.length === 1 ? 'source' : 'sources'}</span>
-        <button type="submit" className="send" aria-label="Send" disabled={streaming || noSources || !input.trim()}>
-          <ArrowUp size={20} />
-        </button>
+        <div className="composer-bar">
+          {usage && <ContextRing usage={usage} />}
+          <span className="source-count">{selectedSlugs.length} {selectedSlugs.length === 1 ? 'source' : 'sources'}</span>
+          <button type="submit" className="send" aria-label="Send" disabled={streaming || noSources || !input.trim()}>
+            <ArrowUp size={18} />
+          </button>
+        </div>
       </form>
       {problem && <MessageModal title="Something went wrong" message={problem} onClose={() => setProblem('')} />}
     </main>

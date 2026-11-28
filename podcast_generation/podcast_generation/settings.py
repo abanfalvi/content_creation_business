@@ -30,7 +30,6 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"  # built React app, served by
 E2B_TEMPLATE = os.environ.get("E2B_TEMPLATE", "podcast-remotion")
 
 # --- Files that live inside the package --------------------------------------------
-BOOK_LIST_PATH = PACKAGE_DIR / "book_list.json"     # the book wishlist (gitignored)
 SKILLS_DIR = PACKAGE_DIR / "skills"                 # skill files, one folder per tier
 
 

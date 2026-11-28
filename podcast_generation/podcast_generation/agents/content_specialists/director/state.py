@@ -3,13 +3,13 @@ from typing_extensions import NotRequired
 from typing import Literal
 
 DirectorStep = Literal[
-    "call_book_selection_agent",
     "call_expert_builder_agent",
     "call_script_drafter_agent",
     "edit_prompts_skills",
     "review_expert_profile",
     "human_review",
     "get_lessons_learned",
+    "approved",
     "full_flexibility",
 ]
 
@@ -18,6 +18,3 @@ class MultiAgentState(AgentState):
     active_agent: NotRequired[DirectorStep]
     system_prompt_read: NotRequired[bool]
     book_title: NotRequired[str]
-
-# Book selection agent
-BookSelectionStep = Literal["check_booklist", "find_books", "update_booklist"]

@@ -7,48 +7,39 @@ import uuid
 from pathlib import Path
 
 from .state import MultiAgentState
-from ..book_selection_agent.agent import book_selection_agent
 from ..expert_builder_agent.agent import expert_builder_agent
 from ..script_drafter_agent.agent import script_drafter_agent
 from ..script_planner_agent.agent import script_planner_agent
 from ..utils import get_book_path
+from podcast_generation.services.formats import read_brief
 
 # content_specialists/ — each specialist keeps its prompt at <agent_name>/prompt.md
 AGENTS_DIR = Path(__file__).resolve().parents[1]
 
+def _with_brief(query: str, slug: str) -> str:
+    """The query with the run's episode brief (format and custom instructions) appended, if the run has one.
+
+    Done here, in code, because the director model only paraphrases what it passes on."""
+    brief = read_brief(slug)
+    return f"{query}\n\n{brief}" if brief else query
 
 class DirectorTools:
     "List of tools for the Content Director agent"
-
-    @tool("select_books")
-    @staticmethod
-    def call_book_selection_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
-        "Find the next relevant book to work on"
-        result = book_selection_agent.invoke({"messages": [{"role": "user", "content": query}]}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::book_selection"}})
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        content=result["messages"][-1].content,
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-                "active_agent": "call_expert_builder_agent",
-            }
-        )
 
     @tool("build_expert_profile")
     @staticmethod
     def call_expert_builder_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Create an expert persona for the book"
-        undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "expert_builder_agent"})
+        book_title = runtime.state.get("book_title", "")
+        title = get_book_path(book_title)
+
+        # Memory is unhooked: runtime.store is None unless a store is passed to the director again.
+        undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "expert_builder_agent"}) if runtime.store else None
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = expert_builder_agent.invoke({"messages": [{"role": "user", "content": query}], "book_title": runtime.state.get("book_title")}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::expert_builder"}})
+        result = expert_builder_agent.invoke({"messages": [{"role": "user", "content": _with_brief(query, title)}], "book_title": book_title}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::expert_builder"}})
         summary = result["messages"][-1].content
 
-        book_title = runtime.state.get("book_title")
-        title = get_book_path(book_title)
         with open(DATA_DIR / title / "expert_persona.md", "r", encoding="utf-8") as f:
             persona_content = f.read()
         return Command(
@@ -68,17 +59,18 @@ class DirectorTools:
     def call_script_drafter_agent(query: str, runtime: ToolRuntime[None, MultiAgentState], replan: bool = False):
         "Draft the script for the next podcast episode from the Script Planner's cited plan. The planner runs automatically only when no plan exists yet. Set replan=True to rebuild the plan first: after the expert persona changed, or when feedback says the episode covers the wrong ideas, misses material or lacks depth. Leave it False for revisions of prose, structure or pacing, which reuse the existing plan."
         thread_id = runtime.execution_info.thread_id
-        book_title = runtime.state.get("book_title")
-        plan_path = DATA_DIR / get_book_path(book_title) / "script_plan.md"
+        book_title = runtime.state.get("book_title", "")
+        title = get_book_path(book_title)
+        plan_path = DATA_DIR / title / "script_plan.md"
         if replan or not plan_path.exists():
             plan_request = f"Plan the script for the next book: {book_title}"
             if replan:
                 plan_request += f"\n\nA plan may already exist and it needs rework. Reason and instructions:\n{query}"
-            _ = script_planner_agent.invoke({"messages": [{"role": "user", "content": plan_request}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_planner"}})
-        undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "script_drafter_agent"})
+            _ = script_planner_agent.invoke({"messages": [{"role": "user", "content": _with_brief(plan_request, title)}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_planner"}})
+        undesired_steps = runtime.store.search(("content_traces",), filter={"type": "failure", "agent_name": "script_drafter_agent"}) if runtime.store else None
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
-        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": query}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_drafter"}})
+        result = script_drafter_agent.invoke({"messages": [{"role": "user", "content": _with_brief(query, title)}], "book_title": book_title}, config={"configurable": {"thread_id": f"{thread_id}::script_drafter"}})
 
         return Command(
             update={
@@ -94,7 +86,7 @@ class DirectorTools:
 
     @tool
     @staticmethod
-    def edit_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"], text_to_replace: str, text_to_replace_with: str, runtime: ToolRuntime[None, MultiAgentState]):
+    def edit_subagents_system_prompt(agent_name: Literal["expert_builder_agent", "script_drafter_agent"], text_to_replace: str, text_to_replace_with: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Edit the system prompt of a specific specialist agent"
         if not runtime.state.get("system_prompt_read"):
             return "Error: you must call read_subagents_system_prompt before editing. Call it now."
@@ -117,7 +109,7 @@ class DirectorTools:
 
     @tool
     @staticmethod
-    def read_subagents_system_prompt(agent_name: Literal["book_selection_agent", "expert_builder_agent", "script_drafter_agent"]):
+    def read_subagents_system_prompt(agent_name: Literal["expert_builder_agent", "script_drafter_agent"]):
         "Read the system prompt of a specific specialist agent"
         with open(AGENTS_DIR / agent_name / "prompt.md", "r", encoding="utf-8") as f:
             agent_prompt = f.read()
@@ -157,7 +149,8 @@ class DirectorTools:
         if decision.get("approved"):
             return Command(update={
                 "messages": [ToolMessage(content="Script approved by the user.", tool_call_id=runtime.tool_call_id)],
-                "active_agent": "get_lessons_learned",
+                # "get_lessons_learned" is unhooked (memory / self-evolution); "approved" just ends the run.
+                "active_agent": "approved",
             })
 
         feedback = decision.get("feedback") or "No specific feedback was given."

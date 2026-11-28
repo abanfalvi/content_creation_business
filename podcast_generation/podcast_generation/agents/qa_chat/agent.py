@@ -28,7 +28,7 @@ def _prompt_with_context(_request) -> str:
     """
     note = (get_config().get("configurable") or {}).get("source_note") or ""
     preference_note = (get_config().get("configurable") or {}).get("preference_note") or ""
-    return "\n\n".join(part for part in (SYSTEM_PROMPT, note, preference_note) if part)
+    return "\n\n".join(part for part in (note, SYSTEM_PROMPT, preference_note) if part)
 
 
 def build_qa_chat_model(model_name: str = CHAT_MODEL) -> ChatOpenRouter:

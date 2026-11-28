@@ -15,8 +15,8 @@ MAX_CONCURRENCY = 8
 # These summaries are embedded in their own collection and retrieved by semantic search, and they are also
 # shown to the QA agent as the "Context" of a chunk. So each one must be self-contained, faithful and
 # written in the vocabulary a reader would use when asking about the material.
-CHAPTER_SUMMARY_SYSTEM = """You write retrieval summaries for a non-fiction book. You are given the text of one \
-chapter. Summarise what that chapter says, so that a reader who has not seen it knows what the book covers there.
+CHAPTER_SUMMARY_SYSTEM = """You write retrieval summaries for a source. You are given the text of one \
+chapter. Summarise what that chapter says, so that a reader who has not seen it knows what the source covers there.
 
 Rules:
 - Use only the chapter text given. Never add outside knowledge, background, opinions or conclusions of your own. If \
@@ -27,16 +27,16 @@ argument, evidence or story it develops, and where it leaves the reader.
 key examples or stories, because readers will search for exactly these. Prefer "the author argues that X because Y" \
 to vague phrases like "discusses the importance of X".
 - Make it self-contained. Do not write "this chapter", "the passage", "the text" or "the following". Name the topic \
-and the book's subject explicitly instead.
+and the source's subject explicitly instead.
 - Ignore page headers and footers, figure captions, tables of contents, indexes, citations lists and other noise. \
 If the text is only front or back matter (copyright, acknowledgments, index, ads), reply with one short \
 sentence saying so.
 - No bullet points, no headings, no \
 markdown, no preamble, and no closing remark. Output only the summary."""
 
-GRANULAR_SUMMARY_SYSTEM = """You write retrieval summaries for a non-fiction book. You are given the passages that \
-come immediately before and after one position in the book. Summarise what those passages say, so that a reader who \
-has not seen them knows what the book discusses around that point.
+GRANULAR_SUMMARY_SYSTEM = """You write retrieval summaries for a source. You are given the passages that \
+come immediately before and after one position in the source. Summarise what those passages say, so that a reader who \
+has not seen them knows what the source discusses around that point.
 
 Rules:
 - Use only the passages given. Never add outside knowledge, background, opinions or conclusions of your own. If a \
@@ -46,9 +46,9 @@ key examples or stories, because readers will search for exactly these. Prefer "
 to vague phrases like "discusses the importance of X".
 - Say what happens in order: what comes just before this position and what follows it, so the reader can see how \
 the argument moves. Label them "Before:" and "After:" when both exist; if only one side exists (start or end of \
-the book), give just that side.
+the source), give just that side.
 - Make it self-contained. Do not write "this section", "the passage", "the text" or "the following". Name the topic \
-and the book's subject explicitly instead.
+and the source's subject explicitly instead.
 - Ignore page headers and footers, figure captions, tables of contents, indexes, citations lists and other noise. \
 If the passages are only front or back matter (copyright, acknowledgments, index, ads), reply with one short \
 sentence saying so.
@@ -57,7 +57,7 @@ markdown, no preamble, and no closing remark. Output only the summary."""
 
 
 def _header(book_title: str, author: str, chapter: str) -> str:
-    return f"Book: {book_title}" + (f" by {author}" if author else "") + (f"\nChapter: {chapter}" if chapter else "")
+    return f"Source: {book_title}" + (f" by {author}" if author else "") + (f"\nChapter: {chapter}" if chapter else "")
 
 
 def _summary_prompt(book_title: str, author: str, chapter: str, chapter_content: str) -> str:
@@ -76,8 +76,8 @@ def _granular_prompt(book_title: str, author: str, chunks: List[Document], idx: 
     chapter = chunks[idx].metadata.get("chapter", "")
     return (
         f"{_header(book_title, author, chapter or '')}\n\n"
-        f"<before>\n{(f'{prev_prev}\n{prev}').strip() or '(start of the book)'}\n</before>\n\n"
-        f"<after>\n{(f'{nxt}\n{nxt_nxt}').strip() or '(end of the book)'}\n</after>"
+        f"<before>\n{(f'{prev_prev}\n{prev}').strip() or '(start of the source)'}\n</before>\n\n"
+        f"<after>\n{(f'{nxt}\n{nxt_nxt}').strip() or '(end of the source)'}\n</after>"
     )
 
 

@@ -12,11 +12,9 @@ from typing import Callable
 from .tools import DirectorTools
 from .step_prompts import ContentDirectorPrompt
 from .state import MultiAgentState
-from ..book_selection_agent.agent import book_selection_agent
 from ..expert_builder_agent.agent import expert_builder_agent
 from ..script_drafter_agent.agent import script_drafter_agent
 from ...models import DIRECTOR_MODEL, track
-from podcast_generation.memory.memory_store import get_shared_store
 from podcast_generation.settings import SKILLS_DIR
 from ..utils import checkpointer
 
@@ -42,11 +40,6 @@ content_skills_search = FilesystemFileSearchMiddleware(
 # Single-tool steps are for forcing one stage (the CLI's --step); the multi-tool
 # steps (review_expert_profile, full_flexibility) let the director pick the stage.
 STEP_CONFIG = {
-    "call_book_selection_agent": {
-        "prompt": "",
-        "tools": [DirectorTools.call_book_selection_agent],
-        "requires": [],
-    },
     "call_expert_builder_agent": {
         "prompt": "",
         "tools": [DirectorTools.call_expert_builder_agent],
@@ -73,14 +66,21 @@ STEP_CONFIG = {
         "tools": [DirectorTools.human_review],
         "requires": [],
     },
+    # UNHOOKED (memory / self-evolution): nothing routes here while the lessons step is off.
     "get_lessons_learned": {
         "prompt": "",
         "tools": [DirectorTools.save_learnable_traces],
         "requires": [],
     },
+    # Where an approved script lands now: no tools, so the model just confirms and the run ends.
+    "approved": {
+        "prompt": "The user approved the script. Reply with one short sentence confirming it is done. Do not call any tools.",
+        "tools": [],
+        "requires": [],
+    },
     "full_flexibility": {
         "prompt": "",
-        "tools": [DirectorTools.call_book_selection_agent, DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
+        "tools": [DirectorTools.call_expert_builder_agent, DirectorTools.call_script_drafter_agent],
         "requires": [],
     },
 }
@@ -141,7 +141,6 @@ def _extract_message_trace(agent, thread_id: str, tag_key: str, tag_value: str |
 # Maps the agent_name used by save_learnable_traces to (its own compiled
 # graph, the thread-id suffix director_tools.py invokes it with).
 SUB_AGENTS = {
-    "book_selection_agent": (book_selection_agent, "book_selection"),
     "expert_builder_agent": (expert_builder_agent, "expert_builder"),
     "script_drafter_agent": (script_drafter_agent, "script_drafter"),
 }
@@ -211,21 +210,17 @@ def apply_step_config(
 
     return handler(request)
 
+# UNHOOKED (memory / self-evolution): read/edit_subagents_system_prompt, update_specialist_skills and
+# save_learnable_traces are defined in DirectorTools but not registered here, and no store is passed below.
 all_tools = [
-    DirectorTools.call_book_selection_agent,
     DirectorTools.call_expert_builder_agent,
     DirectorTools.call_script_drafter_agent,
-    DirectorTools.read_subagents_system_prompt,
-    DirectorTools.edit_subagents_system_prompt,
-    DirectorTools.save_learnable_traces,
-    DirectorTools.update_specialist_skills,
     DirectorTools.human_review,
 ]
 
 @cache
 def get_director_agent():
-    """Build the content director on first use. It needs the Postgres store, so it is
-    not built at import time."""
+    """Build the content director on first use, not at import time."""
     agent = create_agent(
         model=director_model,
         tools=all_tools,
@@ -233,10 +228,10 @@ def get_director_agent():
         state_schema=MultiAgentState,
         middleware=[
             apply_step_config,
-            content_skills_search,
+            # UNHOOKED (self-evolution): content_skills_search (skill lookup for editing skills)
         ],
         checkpointer=checkpointer,
-        store=get_shared_store(),
+        # UNHOOKED (memory): store=get_shared_store() (lessons-learned traces)
     )
     return track(agent)
 

@@ -10,7 +10,6 @@ from langgraph.store.base import BaseStore
 from langchain_core.runnables import RunnableConfig
 
 from langgraph.types import interrupt
-from e2b import Sandbox
 
 from podcast_generation.media import get_audio_segment
 from podcast_generation.settings import DATA_DIR, TMP_DIR, project_path
@@ -22,7 +21,6 @@ from .audio_engineer_agent.agent import audio_engineer_agent
 from .audio_engineer_agent.tools import kill_sandbox
 from .lessons_learned_extractor.tools import LessonsLearnedExtracterAgentTools
 from .lessons_learned_extractor.agent import build_lessons_learned_extractor_agent, build_extraction_request
-from podcast_generation.memory.memory_store import get_shared_store
 from ..models import track
 from .utils import checkpointer
 from ..content_specialists.utils import get_book_path
@@ -51,14 +49,16 @@ def build_episode(script_path: str, voice_map: dict[str, str], output_path: str)
     episode.export(project_path(output_path), format="mp3")
     return output_path
 
-def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, undesired_steps: Dict[str, str], user_feedback: str = "") -> tuple[str, RubricScores]:
+def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, undesired_steps: Dict[str, str] | None, user_feedback: str = "") -> tuple[str, RubricScores]:
     with open(project_path(audio_path), "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode()
 
     with open(project_path(script), "r") as f:
         script_text = f.read()
 
-    model_instruction = f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. The following script was used:\n{script_text}\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
+    model_instruction = f"Analyse this audio clip of a podcast episodes and make sure it has a smooth and natural flow. The following script was used:\n{script_text}"
+    if undesired_steps:
+        model_instruction += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
     if user_feedback:
         model_instruction += f"\n\n The user did not approve the current version of the audio. Review the audio while taking into account their feedback: \n {user_feedback}"
 
@@ -66,12 +66,13 @@ def call_audio_engineer_agent(audio_path: str, script: str, thread_id: str, unde
         {"type": "text", "text": model_instruction},
         {"type": "audio", "base64": audio_b64, "mime_type": "audio/mp3"},
     ])
-    result = audio_engineer_agent.invoke({"messages": [message], "active_step": "edit_audio"}, config={"configurable": {"thread_id": thread_id}})
+    _ = audio_engineer_agent.invoke({"messages": [message], "active_step": "edit_audio"}, config={"configurable": {"thread_id": thread_id}})
 
     rubric_score = audio_engineer_agent.invoke(
         {
             "messages": [HumanMessage(content="You're done editing this pass — finalize your quality assessment now.")],
             "active_step": "score_final_result",
+            "audio_path": str(project_path(audio_path))
         },
         config={"configurable": {"thread_id": thread_id}},
     )
@@ -88,16 +89,16 @@ def generate_podcast_audio_node(state: VoiceWorkflowState) -> dict:
         )
     return {"audio_result": path}
 
-def call_audio_engineer_agent_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
+def call_audio_engineer_agent_node(state: VoiceWorkflowState, *, store: BaseStore | None, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
     _, rubric_scores = call_audio_engineer_agent(
         audio_path=state["audio_result"], 
         script=state["script"], 
         thread_id=audio_engineer_thread_id, 
-        undesired_steps=store.search(("production_traces",), filter={"type": "failure"}),
+        # Memory is unhooked: store is None unless the workflow is compiled with a store again.
+        undesired_steps=store.search(("production_traces",), filter={"type": "failure"}) if store else None,
         user_feedback=state["feedback"]
     )
-
     return {"episode_result": rubric_scores["final_audio_path"], "rubric_scores": rubric_scores}
 
 def human_review_node(state: VoiceWorkflowState) -> dict:
@@ -110,7 +111,7 @@ def human_review_node(state: VoiceWorkflowState) -> dict:
         return {"status": "approved"}
     return {"status": "needs_revision", "feedback": decision.get("feedback")}
 
-def lessons_learned_node(state: VoiceWorkflowState, *, store: BaseStore, config: RunnableConfig) -> dict:
+def lessons_learned_node(state: VoiceWorkflowState, *, store: BaseStore | None, config: RunnableConfig) -> dict:
     audio_engineer_thread_id = f"{config['configurable']['thread_id']}:audio_engineer"
 
     try:
@@ -121,6 +122,10 @@ def lessons_learned_node(state: VoiceWorkflowState, *, store: BaseStore, config:
             print("No sandbox was used, none had to be killed")
     except Exception as error:
         print(f"The sandbox could not be killed, reason: {error}")
+
+    # Self-evolution is unhooked: without a store only the sandbox cleanup above runs.
+    if store is None:
+        return {}
 
     ll_extracter_agent = build_lessons_learned_extractor_agent(store)
 
@@ -146,9 +151,9 @@ builder.add_edge("lessons_learned_path", END)
 
 @cache
 def get_speech_gen_workflow():
-    """Compile the production workflow on first use. It needs the Postgres store, so it is
-    not built at import time."""
-    return track(builder.compile(checkpointer, store=get_shared_store()))
+    """Compile the production workflow on first use, not at import time."""
+    # UNHOOKED (memory): store=get_shared_store() (lessons-learned traces)
+    return track(builder.compile(checkpointer))
 
 
 def __getattr__(name: str):

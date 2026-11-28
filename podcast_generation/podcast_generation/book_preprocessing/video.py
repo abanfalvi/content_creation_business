@@ -60,10 +60,21 @@ def canonical_url(vid: str) -> str:
     return f"https://www.youtube.com/watch?v={vid}"
 
 
+MAX_TITLE_CHARS = 50  # the title is the source's slug and folder name, so a long video title is cut
+
+
 def clean_title(title: str) -> str:
-    """A video title that is safe to use as a folder name (the book slug is derived from it)."""
+    """A video title that is safe to use as a folder name (the book slug is derived from it), cut to a short one.
+
+    A title over MAX_TITLE_CHARS is cut after its last whole word that fits; a single long word is cut hard.
+    """
     title = re.sub(r'[\\/*?"<>|\x00-\x1f]+', " ", title)
-    return re.sub(r"\s+", " ", title).strip(" .")[:100].strip(" .")
+    title = re.sub(r"\s+", " ", title).strip(" .")
+    if len(title) > MAX_TITLE_CHARS:
+        head = title[:MAX_TITLE_CHARS + 1]  # the extra character shows whether the cut falls between words
+        title = head.rsplit(" ", 1)[0] if " " in head else head
+        title = title[:MAX_TITLE_CHARS]
+    return title.strip(" .,;:-")
 
 
 def _message(exc: Exception) -> str:

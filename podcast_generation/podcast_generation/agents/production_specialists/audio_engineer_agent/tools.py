@@ -117,19 +117,34 @@ class AudioEngineerTools:
         transitions: int,
         technical_compliance: int,
         evidence: str,
-        audio_path: str,
         runtime: ToolRuntime,
+        audio_edited: bool = False,
+        audio_path: str | None = None
     ) -> Command:
         """Record your rubric assessment after listening to the current audio.
         Score each dimension 1-5 and cite what you heard as evidence for each.
-        audio_path must be the finished episode as a local data/... file."""
-        # The pipeline copies this path into the episode, so it has to exist locally (not just in the sandbox).
-        if not project_path(audio_path).is_file():
-            return Command(update={"messages": [ToolMessage(
-                content=(f"Not recorded: audio_path '{audio_path}' is not a local file. The final episode must be "
-                         "downloaded from the sandbox into the book's audio_contents folder first; pass that local path."),
-                tool_call_id=runtime.tool_call_id,
-            )]})
+        audio_path must be the finished episode as a local data/... file.
+        Audio path is optional if the audio was not edited."""
+        if audio_edited:
+            if audio_path is None or not project_path(audio_path).is_file():
+                return Command(update={
+                    "messages": [ToolMessage(
+                        content=(f"Missing audio path or Not recorded: audio_path '{audio_path}' is not a local file. The final episode must be "
+                                "downloaded from the sandbox into the source's audio_contents folder first; pass that local path."),
+                        tool_call_id=runtime.tool_call_id,
+                    )],
+                    "rubric_scores": {
+                        "loudness_consistency": loudness_consistency,
+                        "noise_clarity": noise_clarity,
+                        "silence_pacing": silence_pacing,
+                        "transitions": transitions,
+                        "technical_compliance": technical_compliance,
+                        "evidence": evidence,
+                        "final_audio_path": ""
+                    },
+                })
+        else:
+            audio_path = runtime.state.get("audio_path")
         return Command(update={
             "rubric_scores": {
                 "loudness_consistency": loudness_consistency,
@@ -212,7 +227,7 @@ class AudioEngineerTools:
     @staticmethod
     def sbx_download(sandbox_path: str, local_path: str, runtime: ToolRuntime[None, AudioEngineerState]) -> Command | str:
         """Copy a file from the sandbox into the project's data/ folder, e.g. a rendered mp3 into
-        the book's audio_contents folder. Overwrites local_path if it exists."""
+        the source's audio_contents folder. Overwrites local_path if it exists."""
         sbx = _open_sandbox(runtime)
         if isinstance(sbx, str):
             return sbx

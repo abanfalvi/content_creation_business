@@ -1,8 +1,9 @@
-import { AlertCircle, CheckCircle2, Loader2, Mic, PanelRightClose, PanelRightOpen } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Job, type Source } from '../api'
+import { AlertCircle, CheckCircle2, Loader2, Mic, PanelRightClose, PanelRightOpen, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { api, type FormatInfo, type GenerateOptions, type Job, type Source } from '../api'
 import { POLL_FAST, POLL_IDLE, formatTime, usePolling } from '../hooks'
 import ApprovalModal from './ApprovalModal'
+import GenerateModal from './GenerateModal'
 
 // Jobs only change on their own while one is running. A job waiting for approval changes when the user decides,
 // and that action refreshes immediately.
@@ -21,47 +22,77 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
   // Episodes change only when a job finishes, which refreshes them below; this slow tick is just a safety net.
   const { data: episodes, refresh: refreshEpisodes } = usePolling(() => api.episodes(notebookId), POLL_IDLE, [])
   const [reviewId, setReviewId] = useState<string | null>(null)
-  const [error, setError] = useState('')
-  const prompted = useRef(new Set<string>())
+  const [customizing, setCustomizing] = useState(false) // the "Customize podcast" dialog behind the Generate button
+
+  // The formats are files on the server: load them once. If they cannot be loaded the dialog says so and the server
+  // makes the episode in its default format.
+  const [formats, setFormats] = useState<FormatInfo[]>([])
+  useEffect(() => {
+    let cancelled = false
+    api.formats().then(
+      (list) => {
+        if (!cancelled) setFormats(list)
+      },
+      () => undefined,
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const titleOf = (slug: string) => sources.find((s) => s.slug === slug)?.title ?? slug
+  // An episode is named after its sources and how it was asked for (`episode_title`). A combined episode has no
+  // source of its own, so its title and members are stored on the job too.
+  const jobTitle = (j: Job) => {
+    if (typeof j.result?.episode_title === 'string') return j.result.episode_title
+    return typeof j.result?.title === 'string' ? j.result.title : titleOf(j.slug)
+  }
+  const jobSources = (j: Job): string[] => (Array.isArray(j.result?.sources) ? (j.result.sources as string[]) : [j.slug])
+  // The format an episode run was made in, shown for the ones that are not the default.
+  const formatLabel = (j: Job) => {
+    const f = formats.find((x) => x.id === j.result?.format)
+    return f && !f.default ? f.label : ''
+  }
   const isActive = (j: Job) => j.status === 'running' || j.status === 'awaiting_approval'
   const reviewJob = jobs.find((j) => j.id === reviewId && j.status === 'awaiting_approval') ?? null
-
-  // Open the review dialog by itself the first time a run asks for a decision.
-  useEffect(() => {
-    for (const j of jobs) {
-      const key = `${j.id}:${j.gate?.type}`
-      if (j.status === 'awaiting_approval' && j.gate && !prompted.current.has(key)) {
-        prompted.current.add(key)
-        setReviewId(j.id)
-        return
-      }
-    }
-  }, [jobs])
 
   // A finished run adds an episode.
   const finished = jobs.filter((j) => j.status === 'done').length
   useEffect(() => void refreshEpisodes(), [finished, refreshEpisodes])
 
-  const only = selectedSlugs.length === 1 ? selectedSlugs[0] : null
-  const busyWithOnly = only !== null && jobs.some((j) => j.kind === 'generate' && j.slug === only && isActive(j))
+  // Selected sources an unfinished run already uses (on its own or as part of a combined episode).
+  const busySelected = selectedSlugs.some((slug) => jobs.some((j) => j.kind === 'generate' && isActive(j) && jobSources(j).includes(slug)))
   const generateHint = useMemo(() => {
-    if (selectedSlugs.length === 0) return 'Select a source to make an episode from it.'
-    if (selectedSlugs.length > 1) return 'An episode covers one book: select just one source.'
-    if (busyWithOnly) return 'An episode is already being made from this source.'
+    if (selectedSlugs.length === 0) return 'Select a source to make an episode from it, or several to combine them into one episode.'
+    if (busySelected) return selectedSlugs.length === 1 ? 'An episode is already being made from this source.' : 'An episode is already being made from one of these sources.'
+    if (selectedSlugs.length > 1) return `One episode will be made from all ${selectedSlugs.length} selected sources.`
     return ''
-  }, [selectedSlugs.length, busyWithOnly])
+  }, [selectedSlugs.length, busySelected])
 
-  async function generate() {
-    if (!only) return
-    setError('')
+  // Starts the episode from the dialog. A refusal (for example a source that is busy) is thrown back to the dialog,
+  // which shows it and keeps what the user typed.
+  async function generate(options: GenerateOptions) {
+    await api.generate(selectedSlugs, options)
+    await refreshJobs()
+  }
+
+  async function removeJob(id: string) {
     try {
-      await api.generate(only)
-      await refreshJobs()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start the episode.')
+      await api.deleteJob(id)
+    } catch {
+      return // the list refreshes below either way; a run that is already gone just disappears
     }
+    await refreshJobs()
+  }
+
+  // Deleting an episode also removes the finished run that made it, so both lists are refreshed.
+  async function removeEpisode(id: string) {
+    try {
+      await api.deleteEpisode(id)
+    } catch {
+      return
+    }
+    await Promise.all([refreshEpisodes(), refreshJobs()])
   }
 
   if (!open) {
@@ -76,7 +107,9 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
     )
   }
 
-  const visibleJobs = jobs.slice(0, 6)
+  // A failed run is not activity any more: it is listed with the episodes, where it can be removed.
+  const visibleJobs = jobs.filter((j) => j.status !== 'failed').slice(0, 6)
+  const failedJobs = jobs.filter((j) => j.status === 'failed')
 
   return (
     <aside className="panel" aria-label="Studio">
@@ -88,12 +121,11 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
       </header>
 
       <div className="studio-actions">
-        <button className="btn action" disabled={!only || busyWithOnly} title={generateHint || 'Generate a podcast episode from the selected source'} onClick={() => void generate()}>
+        <button className="btn action" disabled={selectedSlugs.length === 0 || busySelected} title={generateHint || 'Generate a podcast episode from the selected sources'} onClick={() => setCustomizing(true)}>
           <Mic size={20} /> Generate podcast
         </button>
       </div>
       {generateHint && <p className="muted small hint">{generateHint}</p>}
-      {error && <p className="notice bad" role="alert">{error}</p>}
 
       {visibleJobs.length > 0 && (
         <section>
@@ -101,20 +133,28 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
           <ul className="cards">
             {visibleJobs.map((j) => (
               <li key={j.id} className={`card job ${j.status}`}>
+                {j.status === 'awaiting_approval' && (
+                  <button
+                    className="alert-bubble"
+                    aria-label={`Review the ${j.gate?.type === 'audio' ? 'audio' : 'script'} of ${jobTitle(j)}`}
+                    title={`Needs your review: open the ${j.gate?.type === 'audio' ? 'audio' : 'script'}`}
+                    onClick={() => setReviewId(j.id)}
+                  >
+                    !
+                  </button>
+                )}
                 <div className="card-top">
-                  <strong>Episode · {titleOf(j.slug)}</strong>
+                  <strong>Episode · {jobTitle(j)}</strong>
                   <StatusIcon status={j.status} />
                 </div>
+                {formatLabel(j) && <span className="muted small">{formatLabel(j)}</span>}
                 {j.status === 'running' && <p className="muted small">{j.activity || 'Working'}…</p>}
                 {j.status === 'awaiting_approval' && (
-                  <button className="btn primary small-btn" onClick={() => setReviewId(j.id)}>
-                    Review {j.gate?.type === 'audio' ? 'audio' : 'script'}
-                  </button>
+                  <p className="muted small">{j.gate?.type === 'audio' ? 'The audio' : 'The script'} is ready for your review.</p>
                 )}
                 {j.status === 'done' && (
                   <p className="muted small">Episode ready — find it below.</p>
                 )}
-                {j.status === 'failed' && <p className="bad small">{j.error || 'Something went wrong.'}</p>}
               </li>
             ))}
           </ul>
@@ -123,17 +163,35 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
 
       <section>
         <h3 className="section-title">Episodes</h3>
-        {episodes.length === 0 ? (
+        {episodes.length === 0 && failedJobs.length === 0 ? (
           <div className="empty compact">
             <p>Generated episodes will be saved here.</p>
             <p className="muted">Select one source and choose Generate podcast.</p>
           </div>
         ) : (
           <ul className="cards">
+            {failedJobs.map((j) => (
+              <li key={j.id} className="card job failed">
+                <div className="card-top">
+                  <strong>{jobTitle(j)}</strong>
+                  <span className="card-actions">
+                    <AlertCircle size={16} className="bad" aria-label="Failed" />
+                    <button className="icon-btn danger" aria-label={`Delete failed episode ${jobTitle(j)}`} title="Delete" onClick={() => void removeJob(j.id)}>
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                </div>
+                {formatLabel(j) && <span className="muted small">{formatLabel(j)}</span>}
+                <p className="bad small">{j.error || 'Something went wrong.'}</p>
+              </li>
+            ))}
             {episodes.map((e) => (
               <li key={e.id} className="card">
                 <div className="card-top">
                   <strong>{e.title}</strong>
+                  <button className="icon-btn danger" aria-label={`Delete episode ${e.title}`} title="Delete" onClick={() => void removeEpisode(e.id)}>
+                    <Trash2 size={15} />
+                  </button>
                 </div>
                 <span className="muted small">{formatTime(e.created_at)}</span>
                 <audio controls preload="none" src={e.audio_url} />
@@ -143,11 +201,20 @@ export default function StudioPanel({ notebookId, open, onToggle, sources, selec
         )}
       </section>
 
+      {customizing && (
+        <GenerateModal
+          formats={formats}
+          sourceCount={selectedSlugs.length}
+          onClose={() => setCustomizing(false)}
+          onGenerate={generate}
+        />
+      )}
+
       {reviewJob && (
         <ApprovalModal
           key={`${reviewJob.id}:${reviewJob.gate?.type}`}
           job={reviewJob}
-          title={titleOf(reviewJob.slug)}
+          title={jobTitle(reviewJob)}
           onClose={() => setReviewId(null)}
           onDecided={() => void refreshJobs()}
         />
@@ -160,5 +227,5 @@ function StatusIcon({ status }: { status: Job['status'] }) {
   if (status === 'running') return <Loader2 size={16} className="spin" aria-label="Running" />
   if (status === 'done') return <CheckCircle2 size={16} className="good" aria-label="Done" />
   if (status === 'failed') return <AlertCircle size={16} className="bad" aria-label="Failed" />
-  return <span className="badge attention">Needs review</span>
+  return null // waiting for review: the card's red bubble says so
 }

@@ -20,7 +20,8 @@ class DirectorTools:
     @tool("draft_sm_content")
     async def call_sm_writer_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Draft the post promoting the next episode for social media"
-        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "sm_writer_agent"})
+        # Memory is unhooked: runtime.store is None unless a store is passed to the director again.
+        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "sm_writer_agent"}) if runtime.store else None
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
         script_path = runtime.state.get("script_path")
@@ -44,7 +45,7 @@ class DirectorTools:
     @tool("publish_sm_post")
     async def call_publisher_agent(query: str, runtime: ToolRuntime[None, MultiAgentState]):
         "Publish the post to social media"
-        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "publisher_agent"})
+        undesired_steps = runtime.store.search(("distribution_traces",), filter={"type": "failure", "active_agent": "publisher_agent"}) if runtime.store else None
         if undesired_steps:
             query += f"\n\n Previously there might have been steps, which did not lead to the most desired or optimal solution, make sure to take them into account:\n {undesired_steps}"
         result = await get_publisher_agent().ainvoke({"messages": [{"role": "user", "content": query}]}, config={"configurable": {"thread_id": f"{runtime.execution_info.thread_id}::publisher_agent"}})
@@ -57,7 +58,8 @@ class DirectorTools:
                         tool_call_id=runtime.tool_call_id,
                     )
                 ],
-                "active_agent": "get_lessons_learned",
+                # "get_lessons_learned" is unhooked (memory / self-evolution); "published" just ends the run.
+                "active_agent": "published",
             }
         )
 

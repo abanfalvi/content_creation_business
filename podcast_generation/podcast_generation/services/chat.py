@@ -4,12 +4,14 @@ import re
 from contextlib import AsyncExitStack
 from typing import AsyncIterator, Sequence
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_openrouter import ChatOpenRouter
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from podcast_generation.agents.qa_chat.agent import build_qa_chat_agent
 from podcast_generation.agents.qa_chat.agent import build_qa_chat_model as build_chat_model
-from podcast_generation.agents.models import CHAT_MODEL
+from podcast_generation.agents.qa_chat.tools import slug_for_model
+from podcast_generation.agents.models import CHAT_MODEL, CHAT_TITLE_MODEL
 from podcast_generation.settings import checkpoint_db
 
 from . import db, notebooks
@@ -20,6 +22,24 @@ log = logging.getLogger(__name__)
 
 
 _MARKER = re.compile(r"\[\[([^\[\]]+)\]\]")
+
+DEFAULT_SESSION_TITLE = "New chat"
+
+_TITLE_PROMPT = (
+    "You name chat conversations. Write a title for a new conversation from the user's first message below. "
+    "At most 8 words, in the same language as the message. Reply with only the title: no quotes, no explanation, "
+    "no trailing punctuation."
+)
+
+
+def build_title_model() -> ChatOpenRouter:
+    """The cheap one-shot model that names a chat after its first message."""
+    return ChatOpenRouter(model=CHAT_TITLE_MODEL, temperature=0.2, max_tokens=32, timeout=15_000)
+
+
+def clean_title(text: str, max_words: int = 8) -> str:
+    """A model reply as a title: surrounding quotes off, whitespace collapsed, at most `max_words` words."""
+    return " ".join(text.strip().strip("\"'").split()[:max_words])
 
 
 def _cited_refs(text: str) -> list[str]:
@@ -70,7 +90,7 @@ def _source_note(selected: Sequence[dict], unindexed: Sequence[str]) -> str:
     for s in selected:
         kind = "video transcript" if s.get("kind") == "youtube" else "book"
         if s["slug"] in short:
-            lines.append(f'- "{s["title"]}" ({kind}; no search index, so read it whole with read_full_source, slug: {s["slug"]})')
+            lines.append(f'- "{s["title"]}" ({kind}; no search index, so read it whole with read_full_source, slug: {slug_for_model(s["slug"])})')
         else:
             lines.append(f'- "{s["title"]}" ({kind})')
     return (
@@ -180,7 +200,7 @@ class ChatEngine:
 
 # --- session list (app database) -------------------------------------------------------
 
-def create_session(notebook_id: str, title: str = "New chat") -> dict:
+def create_session(notebook_id: str, title: str = DEFAULT_SESSION_TITLE) -> dict:
     sid = db.new_id()
     ts = db.now()
     db.insert("sessions", {"id": sid, "notebook_id": notebook_id, "title": title, "created_at": ts, "updated_at": ts})
@@ -196,15 +216,32 @@ def list_sessions(notebook_id: str) -> list[dict]:
     return db.query("SELECT * FROM sessions WHERE notebook_id = ? ORDER BY updated_at DESC", [notebook_id])
 
 
-def touch_session(session_id: str, first_message: str | None = None) -> None:
-    """Bump the session to the top of the list; name it after its first message (unless it was renamed)."""
-    fields: dict = {"updated_at": db.now()}
+def touch_session(session_id: str) -> None:
+    """Bump the session to the top of the list (and its notebook on the home page)."""
+    db.update("sessions", "id", session_id, updated_at=db.now())
     session = get_session(session_id)
-    if session and first_message and session["title"] == "New chat":
-        fields["title"] = first_message.strip().replace("\n", " ")[:60] or "New chat"
-    db.update("sessions", "id", session_id, **fields)
     if session:
         notebooks.touch(session["notebook_id"])
+
+
+async def name_session(session_id: str, first_message: str) -> None:
+    """Name a still-untitled chat after its first message, with one LLM call (at most 8 words).
+
+    Meant to run in the background after a message is sent. A chat the user renamed keeps its name. If the
+    call fails or comes back empty, the chat falls back to being named after the first message itself.
+    """
+    session = get_session(session_id)
+    if session is None or session["title"] != DEFAULT_SESSION_TITLE:
+        return
+    title = ""
+    try:
+        reply = await build_title_model().ainvoke([SystemMessage(_TITLE_PROMPT), HumanMessage(first_message[:2000])])
+        title = clean_title(str(reply.content))
+    except Exception:  # noqa: BLE001 - naming is best-effort and must never break the chat
+        log.warning("Could not name chat %s from its first message", session_id, exc_info=True)
+    if not title:
+        title = " ".join(first_message.split())[:60] or DEFAULT_SESSION_TITLE
+    db.update("sessions", "id", session_id, title=title)
 
 
 def rename_session(session_id: str, title: str) -> dict | None:

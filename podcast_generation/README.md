@@ -1,13 +1,14 @@
 # Podcast Generation
 
-A multi-agent pipeline that turns a non-fiction book into a finished podcast episode, wrapped in a web app
-(**Level Up Lab**). You add PDF books; the app ingests them, lets you chat with the ones you select, and
+A multi-agent pipeline that turns a source (a PDF or a YouTube video) into a finished podcast episode, wrapped in a web app
+(**Level Up Lab**). You add sources; the app ingests them, lets you chat with the ones you select, and
 generates episodes: it invents an expert persona to "interview", plans and writes a two-voice script, checks
-that script against the book, then synthesises and edits the audio. A human approves the script and the final audio; everything else runs on its own.
+that script against the source, then synthesises and edits the audio. A human approves the script and the final audio; everything else runs on its own.
 
 - **Sources** (left): add PDFs (upload or drag and drop) or YouTube videos (paste a link). They are processed automatically; tick the ones you want to work with.
 - **Chat** (middle): ask questions about the ticked sources, with the supporting passages shown. Start as many chats as you like.
-- **Studio** (right): *Generate podcast* for one source (you approve the script, then the audio).
+- **Studio** (right): *Generate podcast* for the ticked sources (you approve the script, then the audio). Tick one source for an
+  episode about it, or several for **one combined episode** that draws on all of them.
 
 Built on [LangGraph](https://github.com/langchain-ai/langgraph) / [LangChain](https://github.com/langchain-ai/langchain).
 Every model call is routed through [OpenRouter](https://openrouter.ai/) and traced in
@@ -17,7 +18,7 @@ Every model call is routed through [OpenRouter](https://openrouter.ai/) and trac
 
 ```
  PDF ──► INGEST ──► CONTENT ──────────────────────────► PRODUCTION
-         parse       Book Selection                      TTS per turn
+         parse                                          TTS per turn
          chunk       Expert Profile Builder              Audio Engineer
          embed       Script Planner  ─► plan w/ citations  rubric score
          digest      Script Drafter  ◄─ 3 evaluators       │
@@ -85,6 +86,14 @@ book are reranked down to 6 and returned with their context summaries), **line-r
 
 ### 2. Content: from book to approved script
 
+**Several sources, one episode.** When more than one source is ticked, `prepare_combined_source`
+([combined.py](podcast_generation/book_preprocessing/combined.py)) joins them into one virtual source with its own
+`data/<slug>/` folder: `book_content.md` holds every source's text under `=== SOURCE i of N: Title ===` banners, behind an
+index of which lines belong to which source, and `source.json` lists the members. Everything downstream is keyed on the
+slug, so line numbers, the digest, grep, the plan's citations, the persona, the script and the audio work unchanged;
+`retrieve_info` searches every member's chunks and labels each passage with its source, and the prompts tell the agents
+to keep each claim attributed to its own source. The job stores the member slugs and the combined title in `result`.
+
 Before the director starts, a new generation job builds the **book digest** (`digest_book` in
 [digest.py](podcast_generation/book_preprocessing/digest.py)), because only the expert builder and the planner read it, so
 ingestion and chat don't pay for it. A map/reduce pass over the whole book builds a line-cited map: thesis,
@@ -96,14 +105,12 @@ specialists. Each of its tool calls sets `active_agent` in the state, and a midd
 prompt and the *only* tools allowed for that step. So a run chains itself through the stages from the first step.
 
 ```
-select_books ─► build_expert_profile ─► review_expert_profile ─► draft_script ─► human_review
- (Book Selection)  (Expert Builder)      (director checks the     (Planner, then    │ approve ─► lessons
-                         ▲                persona against a        Drafter)         │ reject  ─► feedback back to the
-                         └─── fails the check ─┘                                    └────────────  director, which re-routes
+build_expert_profile ─► review_expert_profile ─► draft_script ─► human_review
+ (Expert Builder)      (director checks the     (Planner, then    │ approve ─► done
+                        persona against a        Drafter)         │ reject  ─► feedback back to the
+                        fails the check ─┘                          └────────────  director, which re-routes
 ```
 
-- **Book Selection Agent** searches the web (Tavily) and maintains the wishlist in `podcast_generation/book_list.json`
-  (wishlist → finished).
 - **Expert Profile Builder** reads the book digest first, then retrieves and reads further passages,
   and writes `expert_persona.md`: a *fictional* expert (Identity, Core arguments, Voice, Signature
   material, Likely pushback), grounded in the book. The director then reviews the persona against an
@@ -148,9 +155,16 @@ is a plain LangGraph graph rather than a director:
    loudness consistency, noise and clarity, silence and pacing, transitions, technical compliance.
 3. **Human review**: the run pauses with the audio path and rubric. Approve, or send feedback back to the
    Audio Engineer. This loops until approved.
-4. **Lessons learned**: on approval, an extractor agent distils the engineer's trace into lessons.
+4. **Lessons learned** (currently unhooked): the extractor agent that distils the engineer's trace into lessons is not
+   run. After approval the workflow only cleans up the sandbox and ends.
 
-### 4. How the system learns
+### 4. How the system learns (currently unhooked)
+
+> Memory and self-evolution are switched off for now. The code is all still there, but no Postgres store is passed to the
+> directors or the production workflow, so nothing is saved, read back or edited. The directors no longer get the
+> prompt-editing, skill-editing or trace-saving tools, and after an approval they just end. To hook it back in, pass
+> `store=get_shared_store()` again (search for `UNHOOKED` in `podcast_generation/`), re-register the director tools,
+> and send approvals to `get_lessons_learned` again. The rest of this section describes the hooked-in behaviour.
 
 - On approval, the director runs a `get_lessons_learned` step. It reads the checkpointed traces of the
   director and each specialist and saves **book-agnostic** success and failure traces to a shared store (Postgres).
@@ -182,7 +196,6 @@ podcast_generation/
     models.py                  which OpenRouter model each agent uses, plus Opik tracing setup
     content_specialists/
       director/                routes between the specialists (step config, review/lesson steps)
-      book_selection_agent/
       expert_builder_agent/
       script_planner_agent/    writes the cited plan; verified by an LLM judge
       script_drafter_agent/    writes the script; revision_loop.py + evaluator_prompts/ check it
@@ -200,7 +213,6 @@ podcast_generation/
   prune_checkpoints.py         deletes old checkpoint threads
   services/                    the app's logic: sources, chat, episode generation, app database
   api/                         FastAPI routes (/api/...) and the app that also serves the built frontend
-  book_list.json               wishlist used by the Book Selection agent (gitignored)
 frontend/                      React + TypeScript UI (Vite); `npm run build` writes frontend/dist
 tests/                         API and workflow tests (stubbed models, no network)
 data/                          per-book working files (gitignored)
@@ -257,8 +269,7 @@ different root for `.env`, `data/` and the other runtime folders.
 | Variable | Used for |
 |---|---|
 | `OPENROUTER_API_KEY` | every LLM, embedding, rerank, TTS and image call |
-| `POSTGRES_URI` | **required** for anything that runs a director or the production workflow: the shared store for lessons-learned traces (opened on first use, not at import) |
-| `TAVILY_API_KEY` | web search in book selection |
+| `POSTGRES_URI` | only needed if the lessons-learned store is hooked back in (see "How the system learns"); nothing reads it while that is off |
 | `MINERU_API_KEY` | PDF parsing during ingestion |
 | `OPIK_API_KEY`, `OPIK_WORKSPACE`, `OPIK_CONSOLE_LOGGING_LEVEL` | tracing (Opik is configured from the environment; the project name `podcast_generation` is set in `settings.py`) |
 

@@ -57,6 +57,7 @@ def use_model(monkeypatch, *messages):
 
     monkeypatch.setattr(qa_tools, "_search_chunks", fake_search)
     monkeypatch.setattr(chat, "build_chat_model", lambda: ScriptedModel(script=list(messages)))
+    monkeypatch.setattr(chat, "build_title_model", lambda: ScriptedModel(script=[AIMessage(content="Chat title")]))
     return searched
 
 
@@ -101,8 +102,67 @@ def test_question_streams_an_answer_with_citations_and_is_remembered(client, mon
     assert history[1]["text"] == ANSWER.content
     assert [s["ref"] for s in history[1]["sources"]] == ["r1"]  # only what the answer cites, not everything retrieved
 
-    # the session is named after its first message
-    assert client.get(nb_url(client, "chat/sessions")).json()[0]["title"] == "How do I focus?"
+    # the first message names the chat, via the title model (runs in the background)
+    def named_title():
+        row = next(s for s in client.get(nb_url(client, "chat/sessions")).json() if s["id"] == session["id"])
+        return row["title"] if row["title"] != "New chat" else None
+    assert wait_for(named_title) == "Chat title"
+
+
+def titled(client, session_id):
+    """Poll the session's title until the background naming call has written one."""
+    def named():
+        row = next(s for s in client.get(nb_url(client, "chat/sessions")).json() if s["id"] == session_id)
+        return row["title"] if row["title"] != "New chat" else None
+    return wait_for(named)
+
+
+def test_the_first_message_names_the_chat_with_an_llm_title_of_at_most_8_words(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, ANSWER)
+    seen: list[str] = []
+
+    class TitleRecorder(ScriptedModel):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            seen.extend(str(m.content) for m in messages)
+            return super()._generate(messages, stop, run_manager, **kwargs)
+
+    long_title = '"How to stay focused and productive every single work day"'  # 10 words, quoted
+    monkeypatch.setattr(chat, "build_title_model", lambda: TitleRecorder(script=[AIMessage(content=long_title)]))
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    message = "How can I focus better while reading Deep Work?"
+    events = sse_events(client.post(
+        f"/api/chat/sessions/{session['id']}/messages", json={"message": message, "source_slugs": ["deep_work"]}
+    ))
+    assert events[-1]["type"] == "done"
+
+    # the title model was asked about the user's first message, and its answer became the title:
+    # quotes stripped, capped at 8 words
+    assert message in seen[-1]
+    assert titled(client, session["id"]) == "How to stay focused and productive every single"
+
+    # a later message does not rename the chat
+    sse_events(client.post(
+        f"/api/chat/sessions/{session['id']}/messages", json={"message": "And boredom?", "source_slugs": ["deep_work"]}
+    ))
+    row = next(s for s in client.get(nb_url(client, "chat/sessions")).json() if s["id"] == session["id"])
+    assert row["title"] == "How to stay focused and productive every single"
+
+
+def test_a_failing_title_call_falls_back_to_the_first_message(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+    use_model(monkeypatch, ANSWER)
+
+    def broken_title():
+        raise RuntimeError("no API key")
+
+    monkeypatch.setattr(chat, "build_title_model", broken_title)
+    session = client.post(nb_url(client, "chat/sessions")).json()
+    sse_events(client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={"message": "How do I focus?\nReally?", "source_slugs": ["deep_work"]},
+    ))
+    assert titled(client, session["id"]) == "How do I focus? Really?"
 
 
 def test_a_follow_up_can_cite_passages_from_an_earlier_turn_and_invented_refs_are_dropped(client, monkeypatch):
@@ -138,6 +198,7 @@ def test_model_errors_reach_the_client_as_an_error_event(client, monkeypatch):
         raise RuntimeError("no API key")
 
     monkeypatch.setattr(chat, "build_chat_model", broken)
+    monkeypatch.setattr(chat, "build_title_model", lambda: ScriptedModel(script=[AIMessage(content="Hi chat")]))
     session = client.post(nb_url(client, "chat/sessions")).json()
     events = sse_events(client.post(
         f"/api/chat/sessions/{session['id']}/messages", json={"message": "Hi", "source_slugs": ["deep_work"]}
@@ -203,7 +264,7 @@ def test_source_note_names_each_selected_source_and_the_slug_of_short_ones():
     note = chat._source_note(selected, unindexed=["a_talk"])
     assert "Sources selected for this conversation" in note
     assert '"Deep Work"' in note and '"A Talk"' in note
-    assert "slug: a_talk" in note and "read_full_source" in note  # the short one is readable whole
+    assert "slug: a_talk" in note and "read_full_source" in note  # the short one is readable whole, under its own slug
     assert "slug: deep_work" not in note  # an indexed one is searched, not read whole
     assert chat._source_note([], []) == ""
 

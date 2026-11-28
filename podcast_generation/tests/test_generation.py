@@ -1,4 +1,5 @@
 """The generate -> approve script -> approve audio flow, with scripted stand-ins for the agent graphs."""
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -94,7 +95,8 @@ def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypat
     job_id = started.json()["id"]
     await_gate(client, job_id, "script")
     assert digests == ["Deep Work"]  # built once, when the run starts, not again after the rejected script resumes
-    assert list((book_dir / "archive").glob("*/script.md"))[0].read_text(encoding="utf-8") == "OLD RUN"
+    # the data folder is shared by every test, so earlier runs of this source may have been archived too
+    assert "OLD RUN" in [p.read_text(encoding="utf-8") for p in (book_dir / "archive").glob("*/script.md")]
 
     # 1. script gate: rejecting needs feedback
     gate = await_gate(client, job_id, "script")["gate"]
@@ -122,6 +124,15 @@ def test_full_flow_with_a_rejected_script_and_a_rejected_audio(client, monkeypat
     episode = client.get(nb_url(client, "episodes")).json()[0]
     assert done["result"]["episode_id"] == episode["id"] and episode["title"] == "Deep Work"
     assert client.get(episode["audio_url"]).content == b"ID3-final"
+
+    # deleting the episode removes it, its audio and the finished run that made it
+    stored = generation.get_episode(episode["id"])
+    assert client.delete(f"/api/episodes/{episode['id']}").status_code == 204
+    assert client.get(nb_url(client, "episodes")).json() == []
+    assert client.get(episode["audio_url"]).status_code == 404
+    assert not Path(stored["audio_path"]).exists() and not Path(stored["script_path"]).exists()
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert client.delete(f"/api/episodes/{episode['id']}").status_code == 404
 
     # a new run on the same source is allowed again once the first is finished
     content.steps, production.steps = [script_gate(), {"messages": []}], []
@@ -163,3 +174,22 @@ def test_agent_errors_fail_the_job_with_a_message(client, monkeypatch):
     job_id = client.post("/api/generate", json={"source_slug": "deep_work"}).json()["id"]
     failed = wait_for(lambda: (j := job(client, job_id))["status"] == "failed" and j)
     assert failed["error"] == "POSTGRES_URI is not set."
+
+
+def test_a_failed_run_can_be_deleted_but_a_running_one_cannot(client, monkeypatch):
+    add_ready_source(client, monkeypatch)
+
+    def explode():
+        raise RuntimeError("POSTGRES_URI is not set.")
+
+    monkeypatch.setattr(generation, "get_content_director", explode)
+    job_id = client.post("/api/generate", json={"source_slug": "deep_work"}).json()["id"]
+    wait_for(lambda: job(client, job_id)["status"] == "failed")
+
+    assert client.delete(f"/api/jobs/{job_id}").status_code == 204
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert client.get(f"/api/notebooks/{client.nb}/jobs").json() == []
+    assert client.delete(f"/api/jobs/{job_id}").status_code == 404
+
+    running = generation._new_job("generate", "deep_work", client.nb)  # status "running", nothing advancing it
+    assert client.delete(f"/api/jobs/{running['id']}").status_code == 409

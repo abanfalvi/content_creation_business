@@ -79,6 +79,21 @@ export interface Job {
   updated_at: number
 }
 
+/** An episode format the user can pick (from GET /formats). */
+export interface FormatInfo {
+  id: string
+  label: string
+  description: string
+  default: boolean
+  needs_description: boolean // the user has to describe the episode themselves (the Custom format)
+}
+
+export interface GenerateOptions {
+  format?: string // an id from `formats`; the server's default when left out
+  instructions?: string // custom instructions that steer the episode within its format
+  formatDescription?: string // the user's own description of the episode, for a format that needs one
+}
+
 export interface Episode {
   id: string
   slug: string
@@ -174,8 +189,18 @@ export const api = {
   deletePreference: (id: string) => request<void>(`/preferences/${id}`, { method: 'DELETE' }),
   contextUsage: (id: string) => request<ContextUsage>(`/chat/sessions/${id}/context`),
 
-  generate: (sourceSlug: string) => request<Job>('/generate', json({ source_slug: sourceSlug })),
+  formats: () => request<FormatInfo[]>('/formats'),
+  // One slug makes an episode from that source; several make one combined episode from all of them.
+  generate: (sourceSlugs: string[], options: GenerateOptions = {}) =>
+    request<Job>('/generate', json({
+      source_slugs: sourceSlugs,
+      format: options.format,
+      instructions: options.instructions,
+      format_description: options.formatDescription,
+    })),
   jobs: (notebookId: string) => request<Job[]>(`/notebooks/${notebookId}/jobs`),
+  deleteEpisode: (episodeId: string) => request<void>(`/episodes/${episodeId}`, { method: 'DELETE' }),
+  deleteJob: (jobId: string) => request<void>(`/jobs/${jobId}`, { method: 'DELETE' }),
   decide: (jobId: string, approved: boolean, feedback = '') =>
     request<Job>(`/jobs/${jobId}/decision`, json({ approved, feedback })),
 
